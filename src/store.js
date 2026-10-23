@@ -28,7 +28,6 @@ function defaultState() {
         saga: P.DEFAULT_PROMPTS.saga,     // 史官笔触（归档故事生成 Prompt）
         save: P.DEFAULT_PROMPTS.save      // 铭刻法则（保存修改 Prompt）
       },
-      theme: "day",             // day | night
       apiMode: "host",          // host（复用酒馆主 API）| external
       externalApi: { baseUrl: "", key: "", model: "" }
     },

@@ -7,7 +7,7 @@
 import { store, activePools } from "./store.js";
 import * as Draw from "./draw.js";
 import * as AI from "./ai.js";
-import { CARD_DEFINITIONS, REWARD_TABLE, DIFFICULTY_ORDER, FLOOR_LIMIT, ASSETS, STAR_CRITERIA } from "./pools.js";
+import { CARD_DEFINITIONS, REWARD_TABLE, DIFFICULTY_ORDER, FLOOR_LIMIT } from "./pools.js";
 
 const NS = "fate-sandbox";
 
@@ -173,7 +173,6 @@ function mount() {
 
   bindEvents();
   initBallDrag();
-  applyTheme(store.getSettings().theme);
   renderAll();
   // 安装即显示悬浮球，同步静默状态
   applyActive();
@@ -185,7 +184,6 @@ function buildPanelHTML() {
     <div class="fs-title"><i class="fa-solid fa-dice-d20"></i>命运沙盘</div>
     <div class="fs-skin-ctrl">
       <button class="fs-icon-btn" id="fs-silent-btn" title="静默模式：关闭后停止发送/接收信息"><i class="fa-solid fa-volume-high"></i></button>
-      <button class="fs-icon-btn" id="fs-theme-btn" title="日夜切换"><i class="fa-solid fa-moon"></i></button>
     </div>
   </div>
   <div class="fs-nav">
@@ -268,9 +266,6 @@ function snapBall() {
 function bindEvents() {
   // 导航
   $$(".fs-tab").forEach(tab => tab.addEventListener("click", () => switchPanel(+tab.dataset.panel)));
-
-  // 主题
-  $("#fs-theme-btn").addEventListener("click", toggleTheme);
 
   // 静默模式开关（顶栏）
   $("#fs-silent-btn").addEventListener("click", toggleSilent);
@@ -421,35 +416,6 @@ function showModal(title, bodyHTML, noBtn) {
 }
 function closeModal() { $("#fs-modal-mask").classList.remove("show"); }
 function warn(title, text) { showModal("⚠️ " + title, `<p>${esc(text)}</p>`); }
-
-// ---------- 主题 ----------
-// 切换主题：在 day / night 之间显式翻转，并以 body 上的 theme-dark 类为唯一视觉真源。
-function toggleTheme() {
-  const s = store.getSettings();
-  const isNight = s.theme !== "night"; // 当前不是夜间 → 切到夜间，否则切回日间
-  s.theme = isNight ? "night" : "day";
-  store.saveSettings(s);
-  applyTheme(s.theme);
-}
-
-function applyTheme(theme) {
-  const isNight = theme === "night";
-  const ball = $("#fs-ball");
-  const panel = $("#fs-panel");
-  const zoom = $("#fs-zoom-mask");
-  const modal = $("#fs-modal-mask");
-  // 所有 UI 节点统一切换 fs-night
-  [ball, panel, zoom, modal].forEach(n => { if (n) n.classList.toggle("fs-night", isNight); });
-  // body 上的 theme-dark / theme-light 作为全局主题类（参考「记忆宫殿」的 .dark 机制）
-  if (document.body) {
-    document.body.classList.toggle("theme-dark", isNight);
-    document.body.classList.toggle("theme-light", !isNight);
-  }
-  // 羊皮纸背景：日间 v1 / 夜间燃烧边 v2
-  if (panel) panel.style.setProperty("--fs-bg-image", `url("${isNight ? ASSETS.bgParchmentV2 : ASSETS.bgParchmentV1}")`);
-  const icon = $("#fs-theme-btn i");
-  if (icon) icon.className = isNight ? "fa-solid fa-sun" : "fa-solid fa-moon";
-}
 
 // ---------- 渲染 ----------
 function renderAll() {
@@ -1149,6 +1115,55 @@ function showAdminPanel() {
 
 // ---------- 入口 ----------
 let _inited = false;
+
+// ---------- 命运沙盘内容 → 每轮对话上下文注入（核心） ----------
+// 构建沙盘四字段的注入文本
+function buildSandboxContext() {
+  const world = store.getWorld();
+  const diff = store.getDifficulty();
+  const hasContent = !!(world.goal || world.difficultyText || world.disaster || world.hero);
+  if (!hasContent) return "";
+  const goal = world.goal || "（未设定）";
+  const difficulty = world.difficultyText || `${diff} 级`;
+  const disaster = world.disaster || "（未设定）";
+  const hero = world.hero || "（未契约）";
+  return `[命运沙盘·当前任务状态]
+- 任务目标（终焉之劫）：${goal}
+- 世界难度（灾厄侵蚀度）：${difficulty}
+- 末世类型（灾厄形态）：${disaster}
+- 契约勇者（契约伙伴）：${hero}`;
+}
+
+// 在 CHAT_COMPLETION_PROMPT_READY 时，把沙盘状态作为 system 消息注入发送给大模型的上下文
+function injectSandboxContext(eventData) {
+  try {
+    if (isSilent()) return; // 静默模式不注入（停止发送/接收信息）
+    const injection = buildSandboxContext();
+    if (!injection) return;
+    const chat = eventData?.chat;
+    if (!Array.isArray(chat)) return;
+    // 就地 push 一条 system 消息，SillyTavern 随后会序列化该数组发给大模型
+    chat.push({
+      role: "system",
+      content: injection,
+      is_system: true,
+      force_avatar: false,
+    });
+  } catch (e) { /* 静默 */ }
+}
+
+// 注册上下文注入钩子（参考「记忆宫殿」实现：eventSource/event_types 从 context 取）
+function registerContextInjection() {
+  try {
+    const ctx = getSTContext();
+    const eventSource = ctx && ctx.eventSource;
+    const event_types = ctx && ctx.event_types;
+    if (eventSource && event_types && event_types.CHAT_COMPLETION_PROMPT_READY) {
+      eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, injectSandboxContext);
+    }
+  } catch (e) { /* 静默 */ }
+}
+
 export function init() {
   // 注入 FontAwesome（若无）
   if (!$('link[href*="font-awesome"]') && !$('link[href*="fontawesome"]')) {
@@ -1158,6 +1173,8 @@ export function init() {
   if (_inited) { applyActive(); syncSilentBtn(); return; }
   _inited = true;
   mount();
+  // 注册每轮对话的沙盘上下文注入
+  registerContextInjection();
 }
 
 // ---------- 卸载钩子 ----------
