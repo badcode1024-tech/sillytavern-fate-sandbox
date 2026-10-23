@@ -7,11 +7,25 @@ import { store } from "./store.js";
 import * as Draw from "./draw.js";
 import { REWARD_TABLE } from "./pools.js";
 
-// ---------- 读取酒馆上下文 ----------
+// ---------- 读取酒馆上下文（多版本兼容） ----------
 function getContext() {
-  return (typeof SillyTavern !== "undefined" && SillyTavern.getContext)
-    ? SillyTavern.getContext()
-    : null;
+  if (typeof SillyTavern !== "undefined") {
+    if (typeof SillyTavern.getContext === "function") {
+      const c = SillyTavern.getContext();
+      if (c) return c;
+    }
+    if (SillyTavern.characters || SillyTavern.extensionSettings) return SillyTavern;
+  }
+  if (typeof window !== "undefined") {
+    for (const key of ["SillyTavern", "ST", "context", "SillyTavernContext"]) {
+      const w = window[key];
+      if (w) {
+        if (typeof w.getContext === "function") { const c = w.getContext(); if (c) return c; }
+        if (w.characters) return w;
+      }
+    }
+  }
+  return null;
 }
 
 // ---------- 记忆宫殿联动 ----------

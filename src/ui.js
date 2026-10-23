@@ -38,24 +38,74 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// ---------- 角色卡绑定检测 ----------
-function checkCharacterBind() {
+// ---------- 获取酒馆上下文（多版本兼容） ----------
+function getSTContext() {
+  // 1) SillyTavern.getContext() —— 部分版本
+  if (typeof SillyTavern !== "undefined") {
+    if (typeof SillyTavern.getContext === "function") {
+      const c = SillyTavern.getContext();
+      if (c) return c;
+    }
+    // 2) 旧版：SillyTavern 直接挂载扩展属性
+    if (SillyTavern.characters || SillyTavern.extensionSettings) {
+      return SillyTavern;
+    }
+  }
+  // 3) 全局 window 上常见的酒馆上下文句柄
+  if (typeof window !== "undefined") {
+    for (const key of ["SillyTavern", "ST", "context", "SillyTavernContext"]) {
+      const w = window[key];
+      if (w) {
+        if (typeof w.getContext === "function") { const c = w.getContext(); if (c) return c; }
+        if (w.characters) return w;
+      }
+    }
+  }
+  return null;
+}
+
+// ---------- 读取当前角色卡名称（多版本兼容） ----------
+function getCurrentCharacterName() {
+  const ctx = getSTContext();
+  if (!ctx) return "";
   try {
-    const ctx = (typeof SillyTavern !== "undefined" && SillyTavern.getContext) ? SillyTavern.getContext() : null;
-    if (!ctx || !ctx.characters) return;
-    const idx = ctx.characterId ?? ctx.getCharacters?.()?.findIndex(c => c.chat) ?? 0;
-    const char = ctx.characters[idx];
-    const target = store.getSettings().cardBind || "谁召唤了全能之神";
-    const name = char?.name || "";
-    const matched = name === target;
-    setActive(matched);
+    const chars = ctx.characters || [];
+    if (!chars.length) return "";
+    // 优先用 characterId（数字索引）
+    let idx = ctx.characterId;
+    if (idx == null) {
+      // 备选：getCharacters() 返回当前激活角色
+      if (typeof ctx.getCharacters === "function") {
+        const cur = ctx.getCharacters();
+        if (cur && cur.name) return cur.name;
+      }
+      // 再备选：找 chat 标记为当前的角色
+      const i = chars.findIndex(c => c.chat === true || c.isCurrent === true);
+      idx = i >= 0 ? i : 0;
+    }
+    const char = chars[idx];
+    return (char && char.name) ? char.name : "";
   } catch (e) {
-    setActive(false);
+    return "";
   }
 }
 
-function setActive(on) {
-  if (activeCharacter === on) return;
+// ---------- 角色卡绑定检测 ----------
+let _bindLogged = false;
+function checkCharacterBind() {
+  const target = store.getSettings().cardBind || "谁召唤了全能之神";
+  const name = getCurrentCharacterName().trim();
+  const matched = name === target.trim();
+  // 首次检测时打印诊断信息，便于排查不显示问题
+  if (!_bindLogged) {
+    _bindLogged = true;
+    console.log("[命运沙盘] 角色卡绑定检测 → 当前角色卡:", JSON.stringify(name || "(空)"), "| 目标:", JSON.stringify(target), "| 匹配:", matched, "| 上下文对象:", getSTContext() ? "已获取" : "未获取");
+  }
+  setActive(matched, true);
+}
+
+function setActive(on, force = false) {
+  if (activeCharacter === on && !force) return;
   activeCharacter = on;
   const ball = $("#fs-ball");
   const panel = $("#fs-panel");
@@ -66,6 +116,7 @@ function setActive(on) {
 
 // ---------- 挂载 DOM ----------
 function mount() {
+  if (document.getElementById("fs-ball")) return; // 幂等保护
   // 悬浮球
   const ball = el("div", { class: "fs-ball", id: "fs-ball", style: "display:none" });
   ball.innerHTML = `<div class="fs-ball-inner"><i class="fa-solid fa-dice-d20"></i></div>`;
@@ -114,6 +165,8 @@ function mount() {
   initBallDrag();
   applyTheme(store.getSettings().theme);
   renderAll();
+  // 挂载后立即检测一次角色卡绑定（不等轮询）
+  checkCharacterBind();
 }
 
 function buildPanelHTML() {
@@ -224,7 +277,6 @@ function bindEvents() {
   // 监听角色卡切换 + 楼层监控
   setInterval(() => { checkCharacterBind(); monitorFloor(); }, 1500);
   checkCharacterBind();
-  monitorFloor();
 }
 
 // ---------- 100 层防死循环监控 ----------
@@ -232,7 +284,7 @@ let floorSettling = false;
 function monitorFloor() {
   if (!activeCharacter || floorSettling) return;
   try {
-    const ctx = (typeof SillyTavern !== "undefined" && SillyTavern.getContext) ? SillyTavern.getContext() : null;
+    const ctx = getSTContext();
     if (!ctx) return;
     const chatId = ctx.chatId || ctx.chat?.chatId || "default";
     // 切换了聊天/新任务 → 重置计数
@@ -846,13 +898,25 @@ function showAdminPanel() {
 }
 
 // ---------- 入口 ----------
+let _inited = false;
 export function init() {
   // 注入 FontAwesome（若无）
   if (!$('link[href*="font-awesome"]') && !$('link[href*="fontawesome"]')) {
     const link = el("link", { rel: "stylesheet", href: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" });
     document.head.appendChild(link);
   }
+  if (_inited) { checkCharacterBind(); return; }
+  _inited = true;
   mount();
+
+  // 若上下文暂未就绪（酒馆还在启动），延迟重试直到能读到角色卡
+  let retry = 0;
+  const attempt = () => {
+    checkCharacterBind();
+    const name = getCurrentCharacterName();
+    if (!name && retry < 20) { retry++; setTimeout(attempt, 800); }
+  };
+  setTimeout(attempt, 100);
 }
 
 // ---------- 卸载钩子 ----------
