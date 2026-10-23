@@ -1218,8 +1218,12 @@ function injectSandboxContext(eventData) {
       console.warn("[命运沙盘] 当前没有生效的世界线数据，暂不注入上下文");
       return;
     }
-    // 每轮发送前都刷新一次官方扩展提示词，确保内容最新
-    registerExtensionPrompt();
+    // 每轮发送前都刷新一次官方扩展提示词，确保内容最新；
+    // 官方通道生效时直接返回，避免与手动注入产生重复内容
+    if (registerExtensionPrompt()) {
+      console.log("[命运沙盘] 官方扩展提示词已刷新，将随本轮对话发送给模型");
+      return;
+    }
 
     const injectionContent = buildSandboxContext(world);
 
@@ -1324,5 +1328,12 @@ export function onRemove() {
     const n = $(sel);
     if (n) n.remove();
   });
+  // 清空挂载在酒馆上的官方扩展提示词，避免卸载后仍向上下文注入残留内容
+  try {
+    const ST = getSTContext();
+    if (ST && typeof ST.setExtensionPrompt === "function") {
+      ST.setExtensionPrompt(EXT_PROMPT_KEY, "", 0, 0);
+    }
+  } catch (e) { /* 忽略 */ }
   store.clearAll();
 }

@@ -3,6 +3,13 @@
  * 多端适配：本地酒馆 / 云酒馆 / TauriTavern
  * 通过 SillyTavern 提供的 settings 存储机制写入插件专属命名空间，
  * 卸载时由 onRemove 钩子调用 clearAll() 清空，不留残余。
+ *
+ * ⚠ 关键实现说明：SillyTavern.getContext() 每次调用都会返回一个【全新的临时
+ * 快照对象】，把数据直接挂在它上面会随对象被丢弃而丢失（这正是此前
+ * 「生成世界成功但文本框空白 / 上下文不注入」两个 bug 的根源）。
+ * 因此本层统一把 __fateSandbox 命名空间挂在引用稳定的
+ * ctx.extensionSettings 上：内存中引用唯一，且随 saveSettingsDebounced
+ * 持久化到酒馆设置，也是官方推荐的第三方扩展数据存放位置。
  */
 import * as P from "./pools.js";
 
@@ -41,22 +48,8 @@ function defaultState() {
   };
 }
 
-// 获取持久化存储对象（SillyTavern 扩展 settings）
-function getStore() {
-  // 兼容不同版本酒馆的 settings 扩展方式
-  const ext = getContextObject();
-  if (!ext.__fateSandbox) ext.__fateSandbox = defaultState();
-  // 迁移：补齐缺失的默认 Prompt（老存档兼容）
-  const s = ext.__fateSandbox.settings;
-  if (s && s.prompts) {
-    for (const k of ["judge", "world", "saga", "save"]) {
-      if (!s.prompts[k]) s.prompts[k] = P.DEFAULT_PROMPTS[k];
-    }
-  }
-  return ext.__fateSandbox;
-}
-
-// 多版本兼容：获取酒馆上下文对象作为存储宿主
+// 多版本兼容：获取酒馆上下文对象（仅用于读取 API / 事件等，
+// 绝不可作为存储宿主——它每次调用都是新对象）
 function getContextObject() {
   if (typeof SillyTavern !== "undefined") {
     if (typeof SillyTavern.getContext === "function") {
@@ -74,14 +67,50 @@ function getContextObject() {
       }
     }
   }
-  return (typeof window !== "undefined" ? window : {});
+  return null;
+}
+
+// 获取稳定、可持久化的设置宿主：extensionSettings。
+// 候选顺序：context 快照上的 extensionSettings 引用 →
+// 全局 SillyTavern.extensionSettings → window → null。
+function getSettingsHost() {
+  const ctx = getContextObject();
+  if (ctx && ctx.extensionSettings && typeof ctx.extensionSettings === "object") {
+    return ctx.extensionSettings;
+  }
+  if (typeof SillyTavern !== "undefined" && SillyTavern.extensionSettings && typeof SillyTavern.extensionSettings === "object") {
+    return SillyTavern.extensionSettings;
+  }
+  if (typeof window !== "undefined") return window;
+  return null;
+}
+
+// 无任何宿主时的内存兜底（保证插件在极端环境下仍可运行）
+let _memStore = null;
+
+// 获取持久化存储对象（SillyTavern 扩展 settings）
+function getStore() {
+  const host = getSettingsHost();
+  if (!host) {
+    if (!_memStore) _memStore = defaultState();
+    return _memStore;
+  }
+  if (!host.__fateSandbox || typeof host.__fateSandbox !== "object") host.__fateSandbox = defaultState();
+  // 迁移：补齐缺失的默认 Prompt（老存档兼容）
+  const s = host.__fateSandbox.settings;
+  if (s && s.prompts) {
+    for (const k of ["judge", "world", "saga", "save"]) {
+      if (!s.prompts[k]) s.prompts[k] = P.DEFAULT_PROMPTS[k];
+    }
+  }
+  return host.__fateSandbox;
 }
 
 // 同步写回 settings（触发酒馆保存）
 function persist() {
   try {
     const ctx = getContextObject();
-    ctx.saveSettingsDebounced && ctx.saveSettingsDebounced();
+    if (ctx && typeof ctx.saveSettingsDebounced === "function") ctx.saveSettingsDebounced();
   } catch (e) { /* 忽略 */ }
 }
 
@@ -155,9 +184,13 @@ export const store = {
   clearAll() {
     try {
       const ctx = getContextObject();
-      delete ctx.__fateSandbox;
-      ctx.saveSettingsDebounced && ctx.saveSettingsDebounced();
+      const host = getSettingsHost();
+      if (host) delete host.__fateSandbox;
+      _memStore = null;
+      if (typeof window !== "undefined") delete window.__fateSandbox;
+      if (ctx && typeof ctx.saveSettingsDebounced === "function") ctx.saveSettingsDebounced();
     } catch (e) {
+      _memStore = null;
       if (typeof window !== "undefined") delete window.__fateSandbox;
     }
   }
