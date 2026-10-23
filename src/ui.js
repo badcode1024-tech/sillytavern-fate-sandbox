@@ -432,10 +432,10 @@ function renderPanel(idx) {
 
 // ===== 面板0：命运沙盘 =====
 const FIELD_DEFS = [
-  { key: "goal", title: "终焉之劫", sub: "任务目标", icon: "fa-skull" },
-  { key: "difficultyText", title: "灾厄侵蚀度", sub: "世界难度", icon: "fa-biohazard" },
-  { key: "disaster", title: "灾厄形态", sub: "末世类型", icon: "fa-tornado" },
-  { key: "hero", title: "契约勇者", sub: "勇者角色卡", icon: "fa-shield-halved" }
+  { key: "goal", id: "sandbox-goal-text", title: "终焉之劫", sub: "任务目标", icon: "fa-skull" },
+  { key: "difficultyText", id: "sandbox-difficulty-text", title: "灾厄侵蚀度", sub: "世界难度", icon: "fa-biohazard" },
+  { key: "disaster", id: "sandbox-disaster-text", title: "灾厄形态", sub: "末世类型", icon: "fa-tornado" },
+  { key: "hero", id: "sandbox-hero-text", title: "契约勇者", sub: "勇者角色卡", icon: "fa-shield-halved" }
 ];
 
 function renderSandbox() {
@@ -457,7 +457,7 @@ function renderSandbox() {
     field.innerHTML = `
       <span class="fs-lock-tag"><i class="fa-solid ${locked ? 'fa-lock' : 'fa-lock-open'}"></i> ${locked ? '锁定' : '可篡改'}</span>
       <div class="fs-field-head"><i class="fa-solid ${f.icon}"></i>${f.title}<span class="fs-field-sub">${f.sub}</span></div>
-      <textarea data-key="${f.key}" ${locked ? 'disabled' : ''}>${esc(world[f.key] || '')}</textarea>
+      <textarea id="${f.id}" data-key="${f.key}" ${locked ? 'disabled' : ''}>${esc(world[f.key] || '')}</textarea>
       <div class="fs-field-btns">
         <button class="fs-wax" data-act="tamper"><i class="fa-solid fa-pen-ruler"></i>法则篡改</button>
         <button class="fs-wax ${locked ? '' : 'show'}" data-act="save" style="${locked ? 'display:none' : ''}"><i class="fa-solid fa-floppy-disk"></i>保存篡改</button>
@@ -485,6 +485,34 @@ function renderSandbox() {
   pane.appendChild(footer);
 }
 
+// 通用强效填值函数：显式清空并重写四大文本框（即使锁定 disabled 也强制写入）
+function updateSandboxUI(worldData) {
+  if (!worldData) worldData = store.getWorld();
+  if (!worldData) return;
+  const targetDOMs = {
+    goal: document.querySelector("#sandbox-goal-text"),
+    difficulty: document.querySelector("#sandbox-difficulty-text"),
+    disaster: document.querySelector("#sandbox-disaster-text"),
+    hero: document.querySelector("#sandbox-hero-text")
+  };
+  if (targetDOMs.goal) targetDOMs.goal.value = worldData.goal || "";
+  if (targetDOMs.difficulty) targetDOMs.difficulty.value = worldData.difficultyText || worldData.difficulty || "";
+  if (targetDOMs.disaster) targetDOMs.disaster.value = worldData.disaster || "";
+  if (targetDOMs.hero) targetDOMs.hero.value = typeof worldData.hero === "object" ? JSON.stringify(worldData.hero, null, 2) : (worldData.hero || "");
+  // 自动触发 change/input 事件，确保视图层绝对同步
+  Object.values(targetDOMs).forEach(ta => {
+    if (!ta) return;
+    try { ta.dispatchEvent(new Event("input", { bubbles: true })); } catch (_) {}
+    try { ta.dispatchEvent(new Event("change", { bubbles: true })); } catch (_) {}
+  });
+  console.log("[命运沙盘] 沙盘 UI 已强制刷新：", {
+    goal: worldData.goal ? "√" : "空",
+    difficulty: (worldData.difficultyText || worldData.difficulty) ? "√" : "空",
+    disaster: worldData.disaster ? "√" : "空",
+    hero: worldData.hero ? "√" : "空"
+  });
+}
+
 // 卡牌名映射
 const CARD_BY_ACT = {
   reroll: "重塑因果", import: "旧世复苏", tamper: "法则篡改",
@@ -509,6 +537,7 @@ async function onSaveTamper(fieldKey) {
   world[fieldKey] = val;
   store.setWorld(world);
   unlockedField = null;
+  updateSandboxUI(world);   // 存盘即刷盘
   renderSandbox();
   showModal("✦ 法则已篡改", `<p>「${FIELD_DEFS.find(f => f.key === fieldKey).title}」已被改写。</p>`);
   // 铭刻法则 Prompt（可选 AI 润色，此处直接本地保存）
@@ -540,6 +569,7 @@ async function actionSpecial() {
     try {
       const result = await AI.generateWorldSpecial(hint);
       store.setWorld(result);
+      updateSandboxUI(result);   // 存盘即刷盘
       showModal("✦ 世界已生成", "异界特典世界已编织完成。");
     } catch (e) {
       showModal("「界域演化失败」", `<p>${esc(e.message)}</p><button class="fs-wax" id="fs-retry" data-act="special">再次生成</button>`);
@@ -587,6 +617,7 @@ async function handleImport(e) {
       if (data.契约勇者 || data.hero) world.hero = data.契约勇者 || data.hero;
       if (data.title) world.goal = data.title + (world.goal ? "\n" + world.goal : "");
       store.setWorld(world);
+      updateSandboxUI(world);   // 存盘即刷盘
       renderSandbox();
       showModal("「旧世复苏」", "旧世界已从界域种子中唤回。");
     } catch (err) {
@@ -613,6 +644,7 @@ async function doGenerateInitialWorld() {
     const result = await AI.generateWorldWithDraw(draw, {});
     store.setWorld(result);
     store.setFloor(0);
+    updateSandboxUI(result);   // 存盘即刷盘
     closeModal();
     showModal("✦ 命运世界已创生",
       `<p>已为你开启第一个 <b>F 级</b>命运任务，四大核心设定已填入沙盘。</p>
@@ -634,6 +666,7 @@ async function doGenerateWorld(opts = {}) {
     const result = await AI.generateWorldWithDraw(draw, { fandom: opts.fandom });
     store.setWorld(result);
     store.setDifficulty(draw.diff.level);
+    updateSandboxUI(result);   // 存盘即刷盘：强制写入四大文本框
     closeModal();
     showModal("✦ 世界已重塑", "新的因果线已编织完成。");
     renderSandbox();
@@ -691,6 +724,7 @@ async function actionSettle(opts = {}) {
     const nextDraw = Draw.drawWorld({ difficulty: store.getDifficulty(), fandom: false });
     const nextWorld = await AI.generateWorldWithDraw(nextDraw, {});
     store.setWorld(nextWorld);
+    updateSandboxUI(nextWorld);   // 存盘即刷盘：新任务填充四大文本框
 
     // 重置楼层计数
     store.setFloor(0);
@@ -1116,15 +1150,13 @@ function showAdminPanel() {
 // ---------- 入口 ----------
 let _inited = false;
 
-// ---------- 命运沙盘内容 → 每轮对话上下文注入（核心） ----------
-// 构建沙盘四字段的注入文本
-function buildSandboxContext() {
-  const world = store.getWorld();
+// ---------- 命运沙盘内容 → 每轮对话上下文注入（核心 · 双保险 + 多钩子 + 延时注册） ----------
+// 构建沙盘四字段的注入文本（接受可选 world 参数）
+function buildSandboxContext(world) {
+  if (!world) world = store.getWorld();
   const diff = store.getDifficulty();
-  const hasContent = !!(world.goal || world.difficultyText || world.disaster || world.hero);
-  if (!hasContent) return "";
   const goal = world.goal || "（未设定）";
-  const difficulty = world.difficultyText || `${diff} 级`;
+  const difficulty = world.difficultyText || world.difficulty || `${diff} 级`;
   const disaster = world.disaster || "（未设定）";
   const hero = world.hero || "（未契约）";
   return `[命运沙盘·当前任务状态]
@@ -1134,34 +1166,79 @@ function buildSandboxContext() {
 - 契约勇者（契约伙伴）：${hero}`;
 }
 
-// 在 CHAT_COMPLETION_PROMPT_READY 时，把沙盘状态作为 system 消息注入发送给大模型的上下文
+// 在聊天补全前把沙盘状态注入上下文（双保险：chat 数组最前插 system + full_prompt 文本拼接兜底）
 function injectSandboxContext(eventData) {
   try {
-    if (isSilent()) return; // 静默模式不注入（停止发送/接收信息）
-    const injection = buildSandboxContext();
-    if (!injection) return;
-    const chat = eventData?.chat;
-    if (!Array.isArray(chat)) return;
-    // 就地 push 一条 system 消息，SillyTavern 随后会序列化该数组发给大模型
-    chat.push({
-      role: "system",
-      content: injection,
-      is_system: true,
-      force_avatar: false,
-    });
-  } catch (e) { /* 静默 */ }
+    if (isSilent()) return; // 静默模式不注入
+    const world = store.getWorld();
+    // 校验：只要有任一核心字段存在即触发注入，不严苛判定全空
+    if (!world || (!world.goal && !world.hero && !world.disaster)) {
+      console.warn("[命运沙盘] 当前没有生效的世界线数据，暂不注入上下文");
+      return;
+    }
+    const injectionContent = buildSandboxContext(world);
+
+    // 保险 1：eventData.chat 数组存在 → 插到最前排
+    if (Array.isArray(eventData.chat)) {
+      eventData.chat.unshift({
+        role: "system",
+        content: injectionContent,
+        is_system: true,
+        force_avatar: false,
+      });
+      console.log("[命运沙盘] 成功通过 eventData.chat 注入沙盘上下文！");
+    }
+    // 保险 2：eventData.full_prompt 是字符串 → 直接拼接在最顶部
+    else if (typeof eventData.full_prompt === "string") {
+      eventData.full_prompt = `${injectionContent}\n\n${eventData.full_prompt}`;
+      console.log("[命运沙盘] 成功通过 full_prompt 文本拼接注入沙盘上下文！");
+    } else {
+      console.warn("[命运沙盘] 注入失败：eventData 无 chat 数组也无 full_prompt 字符串");
+    }
+  } catch (e) {
+    console.warn("[命运沙盘] 上下文注入异常：", e);
+  }
 }
 
-// 注册上下文注入钩子（参考「记忆宫殿」实现：eventSource/event_types 从 context 取）
+// 注册上下文注入钩子：同时监听 CHAT_COMPLETION_PROMPT_READY 与 BEFORE_COMPLETION，兼容主流酒馆版本
+let _injectionRegistered = false;
 function registerContextInjection() {
   try {
     const ctx = getSTContext();
     const eventSource = ctx && ctx.eventSource;
     const event_types = ctx && ctx.event_types;
-    if (eventSource && event_types && event_types.CHAT_COMPLETION_PROMPT_READY) {
+    if (!eventSource || !event_types) {
+      return false; // 上下文尚未就绪
+    }
+    // 主钩子
+    if (event_types.CHAT_COMPLETION_PROMPT_READY) {
       eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, injectSandboxContext);
     }
-  } catch (e) { /* 静默 */ }
+    // 兜底钩子（部分酒馆版本/某些触发路径）
+    if (event_types.BEFORE_COMPLETION) {
+      eventSource.on(event_types.BEFORE_COMPLETION, injectSandboxContext);
+    }
+    _injectionRegistered = true;
+    console.log("[命运沙盘] 上下文注入监听器已就位");
+    return true;
+  } catch (e) {
+    console.warn("[命运沙盘] 上下文注入监听器注册失败：", e);
+    return false;
+  }
+}
+
+// 延时/循环注册：防止初始化过早，反复确认监听器已挂载
+function ensureContextInjection() {
+  let attempts = 0;
+  const tryRegister = () => {
+    if (_injectionRegistered) return; // 已就位
+    const ok = registerContextInjection();
+    if (!ok && attempts < 30) {
+      attempts++;
+      setTimeout(tryRegister, 500); // 每 500ms 重试，最多 15 秒
+    }
+  };
+  tryRegister();
 }
 
 export function init() {
@@ -1173,8 +1250,11 @@ export function init() {
   if (_inited) { applyActive(); syncSilentBtn(); return; }
   _inited = true;
   mount();
-  // 注册每轮对话的沙盘上下文注入
-  registerContextInjection();
+  // 注册每轮对话的沙盘上下文注入（延时/循环注册 + load 兜底）
+  ensureContextInjection();
+  if (typeof window !== "undefined") {
+    window.addEventListener("load", () => ensureContextInjection());
+  }
 }
 
 // ---------- 卸载钩子 ----------
