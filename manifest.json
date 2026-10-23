@@ -1,0 +1,15 @@
+{
+  "display_name": "命运沙盘 Fate Sandbox",
+  "loading_order": 12,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "Fate Sandbox Team",
+  "version": "1.0.0",
+  "homePage": "https://github.com/your-name/fate-sandbox",
+  "auto_update": true,
+  "license": "MIT",
+  "language": "zh-CN",
+  "description": "专属于 SillyTavern 的高沉浸感复杂世界模拟与养成插件：本地抽卡 + AI 润色，命运沙盘 / 圣女印记 / 交易所 / 救世录 / 法则镌刻 / 卡池后台 六大模块。"
+}
