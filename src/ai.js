@@ -297,11 +297,11 @@ function buildWorldPrompt(draw, worldPrompt, fandom) {
 ${worldText}
 ${heroText ? "\n【勇者抽取结果】\n" + heroText : ""}
 
-请据此润色生成完整世界设定，并输出以下四个字段（用清晰标签分隔）：
-- 任务目标（终焉之劫）
-- 世界难度（灾厄侵蚀度）
-- 末世类型（灾厄形态）
-- 勇者角色卡（契约勇者，YAML 格式）`;
+请据此润色生成完整世界设定，并严格按以下四个标签分段输出（每段以标签行开头，标签后紧跟中文冒号，内容写在冒号之后或下一行；四个字段缺一不可，顺序如下）：
+任务目标（终焉之劫）：
+世界难度（灾厄侵蚀度）：
+末世类型（灾厄形态）：
+契约勇者（勇者角色卡 YAML）：`;
 }
 
 function buildHeroPrompt(draw) {
@@ -366,12 +366,25 @@ ${memory || "（无）"}
 function parseWorldResult(text, draw) {
   // 尝试从 AI 返回中提取四个字段；若失败则用抽卡原始数据兜底
   const result = { goal: "", difficultyText: "", disaster: "", hero: "" };
-  // 用正则/标记提取，宽松匹配；hero 为多行 YAML，需多行提取
+  // 用正则/标记提取，宽松匹配；hero 为多行 YAML，需多行提取。
+  // 注意 label 顺序：主标签在前（与提示词输出模板一致），别名在后兜底
   const g = extractField(text, ["任务目标", "终焉之劫"]);
   const d = extractField(text, ["世界难度", "灾厄侵蚀度"]);
   const dis = extractField(text, ["末世类型", "灾厄形态"]);
-  const h = extractField(text, ["勇者角色卡", "契约勇者"], { multiline: true });
-  result.goal = g || `任务目标：${draw.disaster?.name || ""}之下，勇者需拯救世界`;
+  const h = extractField(text, ["契约勇者", "勇者角色卡"], { multiline: true });
+
+  // 四个标签全部提取失败时：若返回文本本身是 YAML 角色卡
+  // （模型忽略分段指令、直接输出角色卡），整段作为 hero，其余三字段用抽卡兜底
+  if (!g && !d && !dis && !h && looksLikeHeroYaml(text)) {
+    return {
+      goal: `在「${draw.disaster?.name || "灾厄"}」之下，勇者需拯救世界`,
+      difficultyText: `${draw.diff?.level || "?"}级 · ${draw.diff?.name || ""}`,
+      disaster: draw.disaster?.name || "（末世形态尚未显现）",
+      hero: cleanLinePrefix(String(text)).trim()
+    };
+  }
+
+  result.goal = g || `在「${draw.disaster?.name || "灾厄"}」之下，勇者需拯救世界`;
   result.difficultyText = d || `${draw.diff?.level || "?"}级 · ${draw.diff?.name || ""}`;
   result.disaster = dis || draw.disaster?.name || "（末世形态尚未显现）";
   // 兜底：用抽卡的勇者结构化文本（此前误调用不存在的 heroToPrompt，必然抛 ReferenceError）
@@ -391,37 +404,57 @@ function cleanLinePrefix(s) {
 function isLabelLine(line) {
   const s = String(line || "").trim();
   if (!s) return false;
-  return WORLD_FIELD_LABELS.some(lb => new RegExp(`^[【\\[\\*#\\s>\\-]*${lb}`, "i").test(s));
+  return WORLD_FIELD_LABELS.some(lb => new RegExp(`^[【\\[\\*#\\s>\\-（(]*${lb}`, "i").test(s));
+}
+
+// 无效内容判定：仅由括号/标点/空白构成，或恰好是字段别名词本身。
+// 典型场景：模型按输出模板写出「任务目标（终焉之劫）：」时，
+// 提取器误把括号别名「（终焉之劫）：」当成内容返回，导致文本框只有标签残留。
+function isJunkValue(s) {
+  const t = String(s || "").trim();
+  if (!t) return true;
+  if (/^[（(【\[）)】\]：:·,，.。\s|/\\\-—_=+~`!*#><"'“”‘’]+$/.test(t)) return true;
+  if (/^(yaml|json|角色卡|勇者角色卡|契约勇者|终焉之劫|灾厄侵蚀度|灾厄形态|任务目标|世界难度|末世类型)\s*[（(【\[）)】\]：:·,，。\s]*$/i.test(t)) return true;
+  return false;
+}
+
+// 判断文本是否是 YAML 角色卡（含 name: 与 description/first_mes/personality 之一）
+function looksLikeHeroYaml(text) {
+  const t = String(text || "");
+  return /^\s*name\s*:/m.test(t)
+    && (/^\s*description\s*:/m.test(t) || /^\s*first_mes\s*:/m.test(t) || /^\s*personality\s*:/m.test(t));
 }
 
 /**
  * 从 AI 返回文本中提取字段内容。
  * @param {string} text  AI 返回全文
- * @param {string[]} labels  该字段的可能标签名
+ * @param {string[]} labels  该字段的可能标签名（主标签在前）
  * @param {object} opts  { multiline: true } 时收集标签行之后的多个行（适配 YAML 角色卡）
  */
 function extractField(text, labels, opts = {}) {
   const multiline = !!opts.multiline;
   const lines = String(text || "").split(/\r?\n/);
   for (const label of labels) {
-    const re = new RegExp(`${label}\\s*[：:）)】\\]]?\\s*`, "i");
+    // 匹配「标签 + 可选括号别名 + 可选冒号」：
+    // 覆盖 "任务目标：xxx" / "任务目标（终焉之劫）：xxx" / "任务目标（终焉之劫）: xxx" 等格式
+    const re = new RegExp(`${label}\\s*(?:[（(【\\[][^）)】\\]]{0,24}[）)】\\]])?\\s*[：:]?\\s*`, "i");
     for (let i = 0; i < lines.length; i++) {
       const lm = lines[i].match(re);
       if (!lm) continue;
-      // 标签同行内容
+      // 标签同行残余内容（正则已消费括号别名与冒号）
       const sameLine = cleanLinePrefix(lines[i].slice(lm.index + lm[0].length)).trim();
       if (!multiline) {
-        if (sameLine.length >= 4) return sameLine;
-        // 同行为空 → 向下找第一个非标签的非空行
+        if (!isJunkValue(sameLine) && sameLine.length >= 4) return sameLine;
+        // 同行无有效内容 → 向下找第一个非标签的非空行
         for (let j = i + 1; j < lines.length; j++) {
           if (isLabelLine(lines[j])) return "";
           const t = cleanLinePrefix(lines[j]).trim();
-          if (t.length >= 4) return t;
+          if (!isJunkValue(t) && t.length >= 4) return t;
         }
         return "";
       }
       // 多行模式：收集到下一个字段标签行或文本末尾（适配 YAML 角色卡）
-      const out = sameLine ? [sameLine] : [];
+      const out = sameLine && !isJunkValue(sameLine) ? [sameLine] : [];
       for (let j = i + 1; j < lines.length; j++) {
         if (isLabelLine(lines[j])) break;
         out.push(cleanLinePrefix(lines[j]));
