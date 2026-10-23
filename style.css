@@ -66,6 +66,13 @@
   font-size: 26px;
   text-shadow: 0 0 10px rgba(245, 236, 214, .6);
 }
+/* 静默模式：悬浮球变灰降透明度 */
+#fs-ball.fs-silent .fs-ball-inner {
+  background: linear-gradient(145deg, #6b6b6b, #3a3a3a);
+  border-color: #888;
+  filter: grayscale(.7);
+}
+#fs-ball.fs-silent i { color: #bdbdbd; text-shadow: none; }
 
 /* ---------- 主面板 ---------- */
 #fs-panel {
@@ -133,6 +140,12 @@
   transition: transform .2s;
 }
 #fs-panel .fs-icon-btn:hover { transform: rotate(-12deg) scale(1.08); }
+/* 静默按钮激活态（红色提示） */
+#fs-panel .fs-icon-btn.active {
+  border-color: #c23b2a;
+  color: #c23b2a;
+  background: rgba(194, 59, 42, .12);
+}
 
 /* 导航栏 */
 #fs-panel .fs-nav {
@@ -438,6 +451,28 @@
 }
 #fs-panel .fs-api-row { display: flex; gap: 16px; margin-bottom: 10px; }
 #fs-panel .fs-api-row label { font-weight: 400; font-size: .9em; }
+
+/* 静默模式行 + 滑动开关 */
+#fs-panel .fs-silent-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+#fs-panel .fs-toggle {
+  position: relative; display: inline-block; width: 48px; height: 26px; flex-shrink: 0;
+}
+#fs-panel .fs-toggle input { opacity: 0; width: 0; height: 0; }
+#fs-panel .fs-toggle-slider {
+  position: absolute; cursor: pointer; inset: 0;
+  background: #b8a38d; border-radius: 26px;
+  transition: .3s;
+  border: 1px solid var(--fs-line);
+}
+#fs-panel .fs-toggle-slider::before {
+  content: ""; position: absolute; height: 20px; width: 20px;
+  left: 2px; bottom: 2px; background: #fff; border-radius: 50%;
+  transition: .3s;
+}
+#fs-panel .fs-toggle input:checked + .fs-toggle-slider { background: #c23b2a; }
+#fs-panel .fs-toggle input:checked + .fs-toggle-slider::before { transform: translateX(22px); }
 #fs-panel .fs-admin-deco {
   text-align: center; font-size: 1.4em; color: var(--fs-ink-soft);
   margin-top: 20px; cursor: pointer; opacity: .5; transition: opacity .2s;
