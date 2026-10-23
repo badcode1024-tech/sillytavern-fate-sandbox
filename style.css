@@ -546,6 +546,31 @@
 }
 #fs-panel .fs-admin-sub { font-size: .82em; color: var(--fs-accent-2); margin: 8px 0 4px; font-weight: 700; }
 
+/* 卡池条目：名称 + 描述 双字段编辑 */
+#fs-panel .fs-admin-item {
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px dashed var(--fs-line);
+  border-radius: 8px;
+  background: var(--fs-panel);
+}
+#fs-panel .fs-admin-item input {
+  width: 100%; padding: 6px 8px; margin-bottom: 5px;
+  background: rgba(255,250,235,.4); color: var(--fs-ink);
+  border: 1px solid var(--fs-line); border-radius: 6px; font-size: .85em;
+  font-weight: 700;
+}
+#fs-panel .fs-admin-item textarea {
+  width: 100%; min-height: 44px; resize: vertical;
+  padding: 6px 8px;
+  background: rgba(255,250,235,.3); color: var(--fs-ink-soft);
+  border: 1px solid var(--fs-line); border-radius: 6px; font-size: .8em;
+  line-height: 1.5;
+  font-family: inherit;
+}
+#fs-panel.fs-night .fs-admin-item input,
+#fs-panel.fs-night .fs-admin-item textarea { background: rgba(0,0,0,.2); }
+
 /* ---------- 响应式 ---------- */
 @media (max-width: 480px) {
   #fs-panel { width: 100vw; }
