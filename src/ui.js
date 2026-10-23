@@ -270,12 +270,7 @@ function bindEvents() {
   $$(".fs-tab").forEach(tab => tab.addEventListener("click", () => switchPanel(+tab.dataset.panel)));
 
   // 主题
-  $("#fs-theme-btn").addEventListener("click", () => {
-    const s = store.getSettings();
-    const next = s.theme === "day" ? "night" : "day";
-    s.theme = next; store.saveSettings(s);
-    applyTheme(next);
-  });
+  $("#fs-theme-btn").addEventListener("click", toggleTheme);
 
   // 静默模式开关（顶栏）
   $("#fs-silent-btn").addEventListener("click", toggleSilent);
@@ -428,14 +423,24 @@ function closeModal() { $("#fs-modal-mask").classList.remove("show"); }
 function warn(title, text) { showModal("⚠️ " + title, `<p>${esc(text)}</p>`); }
 
 // ---------- 主题 ----------
+// 切换主题：在 day / night 之间显式翻转，并以 body 上的 theme-dark 类为唯一视觉真源。
+function toggleTheme() {
+  const s = store.getSettings();
+  const isNight = s.theme !== "night"; // 当前不是夜间 → 切到夜间，否则切回日间
+  s.theme = isNight ? "night" : "day";
+  store.saveSettings(s);
+  applyTheme(s.theme);
+}
+
 function applyTheme(theme) {
   const isNight = theme === "night";
   const ball = $("#fs-ball");
   const panel = $("#fs-panel");
   const zoom = $("#fs-zoom-mask");
   const modal = $("#fs-modal-mask");
-  // 所有 UI 节点统一切换 fs-night；同时同步 body 上的 theme-dark 类（供外部联动）
+  // 所有 UI 节点统一切换 fs-night
   [ball, panel, zoom, modal].forEach(n => { if (n) n.classList.toggle("fs-night", isNight); });
+  // body 上的 theme-dark / theme-light 作为全局主题类（参考「记忆宫殿」的 .dark 机制）
   if (document.body) {
     document.body.classList.toggle("theme-dark", isNight);
     document.body.classList.toggle("theme-light", !isNight);

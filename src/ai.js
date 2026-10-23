@@ -60,110 +60,144 @@ function readMemoryPalace() {
   } catch (e) { return ""; }
 }
 
-// ---------- 外接独立 API：拉取模型列表 ----------
-// 请求 OpenAI 兼容接口的 /models 端点，返回模型 id 数组
+// ---------- 外接独立 API：拉取模型列表（参考「记忆宫殿」实现） ----------
 export async function fetchExternalModels() {
   const s = store.getSettings();
   const api = s.externalApi || {};
-  if (!api.baseUrl) throw new Error("请先填写外接 API 地址（Base URL）。");
-  const base = api.baseUrl.replace(/\/$/, "");
-  // 兼容两种端点：/models 或 /v1/models
-  const urls = [base + "/models", base + "/v1/models"];
-  const headers = {
-    "Content-Type": "application/json",
-    ...(api.key ? { Authorization: `Bearer ${api.key}` } : {})
-  };
-  let lastErr;
-  for (const url of urls) {
-    try {
-      const res = await fetch(url, { method: "GET", headers });
-      if (!res.ok) { lastErr = new Error(`HTTP ${res.status}`); continue; }
-      const data = await res.json();
-      const list = data?.data || data?.models || [];
-      const ids = list.map(m => m?.id || m?.model || m).filter(x => typeof x === "string" && x);
-      if (ids.length) return ids;
-      lastErr = new Error("接口未返回模型列表");
-    } catch (e) {
-      lastErr = e;
-    }
+  const url = (api.baseUrl || "").trim();
+  const key = (api.key || "").trim();
+
+  if (!url) throw new Error("请先填写外接 API 地址（Base URL）。");
+
+  // 从可能含 /chat/completions 的地址反推 base URL
+  let baseUrl = url;
+  baseUrl = baseUrl.replace(/\/chat\/completions\/?$/, "");
+  baseUrl = baseUrl.replace(/\/completions\/?$/, "");
+  baseUrl = baseUrl.replace(/\/+$/, "");
+
+  const modelsUrl = `${baseUrl}/models`;
+  const headers = {};
+  if (key) headers["Authorization"] = `Bearer ${key}`;
+
+  const resp = await fetch(modelsUrl, { method: "GET", headers });
+  if (!resp.ok) {
+    throw new Error(`HTTP ${resp.status}`);
   }
-  throw new Error("拉取模型失败：" + (lastErr?.message || lastErr) + "（请确认地址正确、Key 有效、接口支持 /models）");
+  const data = await resp.json();
+  const models = (data.data || data.models || [])
+    .map(m => m.id || m.name || m.model)
+    .filter(x => typeof x === "string" && x)
+    .sort();
+  return models;
 }
 
-// ---------- 外接独立 API 调用 ----------
+// ---------- 外接独立 API 调用（参考「记忆宫殿」实现） ----------
 async function callExternalApi(prompt, opts = {}) {
   const s = store.getSettings();
   const api = s.externalApi || {};
-  if (!api.baseUrl) throw new Error("未配置外接 API 地址，请前往「法则镌刻」设置。");
-  const url = api.baseUrl.replace(/\/$/, "") + "/v1/chat/completions";
-  const body = {
-    model: api.model || "gpt-4o-mini",
-    messages: [{ role: "system", content: opts.system || "" }, { role: "user", content: prompt }],
-    temperature: opts.temperature ?? 0.8,
-    max_tokens: opts.maxTokens ?? 2048
-  };
-  let res;
+  let url = (api.baseUrl || "").trim();
+  const key = (api.key || "").trim();
+  const model = (api.model || "").trim();
+
+  if (!url) throw new Error("未配置外接 API 地址，请前往「法则镌刻」设置。");
+
+  // URL 规范化：用户可能填 base URL（如 https://xxx.com/v1）而非完整
+  // chat/completions 地址，自动补全，避免 POST 打到 base URL 上 404/405。
+  if (!/\/chat\/completions\/?$/i.test(url)) {
+    url = url.replace(/\/+$/, "") + "/chat/completions";
+  }
+
+  const system = opts.system || "";
+  const merged = system ? `${system}\n\n---\n\n${prompt}` : prompt;
+
+  const body = { messages: [{ role: "user", content: merged }] };
+  // 只有填了 model 才带 model 字段（有些网关不填也能跑）
+  if (model) body.model = model;
+  if (opts.temperature != null) body.temperature = opts.temperature;
+  if (opts.maxTokens != null) body.max_tokens = opts.maxTokens;
+
+  const headers = { "Content-Type": "application/json" };
+  if (key) headers["Authorization"] = `Bearer ${key}`;
+
+  let resp;
   try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(api.key ? { Authorization: `Bearer ${api.key}` } : {})
-      },
-      body: JSON.stringify(body)
-    });
+    resp = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
   } catch (e) {
-    throw new Error("网络请求失败：" + (e?.message || e));
+    throw new Error(`无法连接外部 API（${e?.message || "网络错误"}）。请检查地址是否可访问、是否需走代理。`);
   }
-  if (!res.ok) {
+
+  if (!resp.ok) {
     let detail = "";
-    try { const j = await res.json(); detail = j?.error?.message || JSON.stringify(j); } catch (_) {}
-    throw new Error(`外部 API 返回错误：HTTP ${res.status}${detail ? " —— " + detail : ""}`);
+    try {
+      const errData = await resp.json();
+      detail = errData?.error?.message || errData?.message || errData?.error || "";
+    } catch (_) { /* 忽略 */ }
+    throw new Error(`外部 API 请求失败：HTTP ${resp.status}${detail ? " — " + detail : ""}`);
   }
-  const data = await res.json();
-  return data?.choices?.[0]?.message?.content || "";
+
+  const data = await resp.json();
+  // 兼容 OpenAI / Anthropic / 其他常见返回格式
+  if (data.choices && data.choices[0] && data.choices[0].message) {
+    return data.choices[0].message.content || "";
+  }
+  if (data.content && Array.isArray(data.content)) {
+    const textParts = data.content.filter(c => c.type === "text").map(c => c.text);
+    if (textParts.length) return textParts.join("\n");
+  }
+  if (typeof data.content === "string") return data.content;
+  if (data.output_text) return data.output_text;
+  if (data.output && Array.isArray(data.output)) {
+    const txt = data.output.filter(c => c.type === "text").map(c => c.text).join("\n");
+    if (txt) return txt;
+  }
+  return "";
 }
 
-// ---------- 复用酒馆主 API（官方静默生成接口） ----------
+// ---------- 复用酒馆主 API（官方 generateQuietPrompt 接口） ----------
+// 参考「记忆宫殿」插件的成熟实现：generateQuietPrompt 只接受 { quietPrompt } 对象，
+// 需把 system 与 user 合并进 quietPrompt，否则系统指令会被忽略。
 async function callHostApi(prompt, opts = {}) {
   const ctx = getContext();
   if (!ctx) throw new Error("无法读取酒馆上下文（SillyTavern 全局对象未就绪）。");
 
-  // 优先使用官方 generateQuiet（静默生成，不污染聊天，返回 Promise<string>）
-  if (typeof ctx.generateQuiet === "function") {
-    try {
-      const text = await ctx.generateQuiet(prompt, {
-        quietToLoud: false,
-        skipWIAN: true,
-        ...(opts.temperature != null ? { temperature: opts.temperature } : {})
-      });
-      return normalizeText(text);
-    } catch (e) {
-      throw new Error("酒馆静默生成失败：" + (e?.message || e));
-    }
-  }
+  const system = opts.system || "";
+  const merged = system ? `${system}\n\n---\n\n${prompt}` : prompt;
 
-  // 备选：generate(type, prompt, options)
-  if (typeof ctx.generate === "function") {
-    try {
-      const text = await ctx.generate("quiet", prompt, {
-        quietToLoud: false,
-        skipWIAN: true,
-        ...(opts.temperature != null ? { temperature: opts.temperature } : {})
-      });
-      return normalizeText(text);
-    } catch (e) {
-      throw new Error("酒馆生成接口调用失败：" + (e?.message || e));
-    }
-  }
-
-  // 兜底：旧版 generateQuietPrompt
+  // 首选官方 generateQuietPrompt（对象传参）
   if (typeof ctx.generateQuietPrompt === "function") {
     try {
-      const text = await ctx.generateQuietPrompt(prompt, false, false);
-      return normalizeText(text);
+      const result = await ctx.generateQuietPrompt({ quietPrompt: merged });
+      return normalizeText(result);
     } catch (e) {
       throw new Error("酒馆 generateQuietPrompt 调用失败：" + (e?.message || e));
+    }
+  }
+
+  // 备选：generateQuiet(type, prompt, options)
+  if (typeof ctx.generateQuiet === "function") {
+    try {
+      const result = await ctx.generateQuiet("quiet", merged, {
+        quietToLoud: false,
+        skipWIAN: true,
+        ...(opts.temperature != null ? { temperature: opts.temperature } : {})
+      });
+      return normalizeText(result);
+    } catch (e) {
+      throw new Error("酒馆 generateQuiet 调用失败：" + (e?.message || e));
+    }
+  }
+
+  // 兜底：generate(type, prompt, options)
+  if (typeof ctx.generate === "function") {
+    try {
+      const result = await ctx.generate("quiet", merged, {
+        quietToLoud: false,
+        skipWIAN: true,
+        ...(opts.temperature != null ? { temperature: opts.temperature } : {})
+      });
+      return normalizeText(result);
+    } catch (e) {
+      throw new Error("酒馆 generate 调用失败：" + (e?.message || e));
     }
   }
 
