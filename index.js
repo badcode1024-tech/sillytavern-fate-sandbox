@@ -5,7 +5,7 @@
  * 兼容策略：SillyTavern 扩展插件通过顶层 `init()` 函数被加载器调用，
  * 本入口直接导出 init/onRemove，并由顶层立即执行 init。
  */
-import { init, onRemove } from "./src/ui.js";
+import { init, onRemove, debug } from "./src/ui.js";
 
 // SillyTavern 的插件加载器会调用顶层作用域的 init()。
 // 为保证万无一失，这里在模块加载完成后立刻执行一次 init。
@@ -14,5 +14,5 @@ init();
 
 // 暴露全局（供调试 / 其他插件联动 / 手动重载）
 if (typeof window !== "undefined") {
-  window.FateSandbox = { id: "fate-sandbox", init, onRemove };
+  window.FateSandbox = { id: "fate-sandbox", init, onRemove, debug };
 }
