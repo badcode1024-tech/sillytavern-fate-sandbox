@@ -30,9 +30,9 @@ function defaultState() {
       },
       theme: "day",             // day | night
       apiMode: "host",          // host（复用酒馆主 API）| external
-      externalApi: { baseUrl: "", key: "", model: "" },
-      cardBind: "谁召唤了全能之神" // 角色卡精确匹配名
+      externalApi: { baseUrl: "", key: "", model: "" }
     },
+    silent: false,              // 静默模式：关闭后不发送/接收信息
     pools: null,                // 卡池覆盖（后台编辑后存此，null 表示用默认）
     pendingJudge: null,         // 终局结算判定缓存（防止重复结算）
     floor: 0,                   // 当前任务在酒馆内已进行的楼层数（100 层强制结算用）
@@ -98,6 +98,10 @@ export const store = {
   // 设置
   getSettings() { return getStore().settings; },
   saveSettings(s) { getStore().settings = s; persist(); },
+
+  // 静默模式
+  isSilent() { return !!getStore().silent; },
+  setSilent(v) { getStore().silent = !!v; persist(); },
 
   // 卡池覆盖
   getPoolsOverride() { return getStore().pools; },

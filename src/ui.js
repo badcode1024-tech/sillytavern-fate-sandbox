@@ -1,7 +1,8 @@
 /**
  * 命运沙盘 —— UI 层
  * 悬浮球拖拽吸附 + 六大分栏 + 卡牌翻转 + 日夜皮肤 + 响应式。
- * 角色卡精确匹配「谁召唤了全能之神」时才激活显示。
+ * 安装即用：悬浮球默认显示，不识别角色卡名称。
+ * 「静默模式」开关：关闭后插件不再发送/接收信息。
  */
 import { store, activePools } from "./store.js";
 import * as Draw from "./draw.js";
@@ -11,7 +12,6 @@ import { CARD_DEFINITIONS, REWARD_TABLE, DIFFICULTY_ORDER, FLOOR_LIMIT, ASSETS, 
 const NS = "fate-sandbox";
 
 // ---------- 状态 ----------
-let activeCharacter = false;   // 当前角色卡是否匹配
 let currentPanel = 0;
 let pendingRedeem = null;      // 待兑换卡牌
 let unlockedField = null;      // 已解锁编辑的字段
@@ -38,20 +38,15 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// ---------- 获取酒馆上下文（多版本兼容） ----------
+// ---------- 获取酒馆上下文（多版本兼容，仅楼层监控/AI 用） ----------
 function getSTContext() {
-  // 1) SillyTavern.getContext() —— 部分版本
   if (typeof SillyTavern !== "undefined") {
     if (typeof SillyTavern.getContext === "function") {
       const c = SillyTavern.getContext();
       if (c) return c;
     }
-    // 2) 旧版：SillyTavern 直接挂载扩展属性
-    if (SillyTavern.characters || SillyTavern.extensionSettings) {
-      return SillyTavern;
-    }
+    if (SillyTavern.characters || SillyTavern.extensionSettings) return SillyTavern;
   }
-  // 3) 全局 window 上常见的酒馆上下文句柄
   if (typeof window !== "undefined") {
     for (const key of ["SillyTavern", "ST", "context", "SillyTavernContext"]) {
       const w = window[key];
@@ -64,61 +59,30 @@ function getSTContext() {
   return null;
 }
 
-// ---------- 读取当前角色卡名称（多版本兼容） ----------
-function getCurrentCharacterName() {
-  const ctx = getSTContext();
-  if (!ctx) return "";
-  try {
-    const chars = ctx.characters || [];
-    if (!chars.length) return "";
-    // 优先用 characterId（数字索引）
-    let idx = ctx.characterId;
-    if (idx == null) {
-      // 备选：getCharacters() 返回当前激活角色
-      if (typeof ctx.getCharacters === "function") {
-        const cur = ctx.getCharacters();
-        if (cur && cur.name) return cur.name;
-      }
-      // 再备选：找 chat 标记为当前的角色
-      const i = chars.findIndex(c => c.chat === true || c.isCurrent === true);
-      idx = i >= 0 ? i : 0;
-    }
-    const char = chars[idx];
-    return (char && char.name) ? char.name : "";
-  } catch (e) {
-    return "";
-  }
-}
+// ---------- 静默模式 ----------
+function isSilent() { return store.isSilent(); }
 
-// ---------- 角色卡绑定检测 ----------
-let _bindLogged = false;
-function checkCharacterBind() {
-  const target = store.getSettings().cardBind || "谁召唤了全能之神";
-  const name = getCurrentCharacterName().trim();
-  const matched = name === target.trim();
-  // 首次检测时打印诊断信息，便于排查不显示问题
-  if (!_bindLogged) {
-    _bindLogged = true;
-    console.log("[命运沙盘] 角色卡绑定检测 → 当前角色卡:", JSON.stringify(name || "(空)"), "| 目标:", JSON.stringify(target), "| 匹配:", matched, "| 上下文对象:", getSTContext() ? "已获取" : "未获取");
-  }
-  setActive(matched, true);
-}
-
-function setActive(on, force = false) {
-  if (activeCharacter === on && !force) return;
-  activeCharacter = on;
+// 悬浮球激活状态：安装即显示，静默时仅样式变灰，仍可点击打开面板切换开关
+function applyActive() {
+  const silent = isSilent();
   const ball = $("#fs-ball");
   const panel = $("#fs-panel");
-  if (ball) ball.style.display = on ? "flex" : "none";
-  if (panel && !on) panel.classList.remove("open");
-  if (panel) panel.style.display = on ? "flex" : "none";
+  if (ball) {
+    ball.style.display = "flex";
+    ball.classList.toggle("fs-silent", silent);
+    ball.title = silent ? "命运沙盘 · 静默模式已开启" : "命运沙盘";
+  }
+  if (panel) {
+    panel.classList.toggle("fs-silent", silent);
+  }
+  syncSilentBtn();
 }
 
 // ---------- 挂载 DOM ----------
 function mount() {
   if (document.getElementById("fs-ball")) return; // 幂等保护
-  // 悬浮球
-  const ball = el("div", { class: "fs-ball", id: "fs-ball", style: "display:none" });
+  // 悬浮球（安装即显示，不再识别角色卡）
+  const ball = el("div", { class: "fs-ball", id: "fs-ball" });
   ball.innerHTML = `<div class="fs-ball-inner"><i class="fa-solid fa-dice-d20"></i></div>`;
   ball.addEventListener("click", e => { if (!ball.dataset.dragged) togglePanel(); ball.dataset.dragged = ""; });
   document.body.appendChild(ball);
@@ -165,8 +129,8 @@ function mount() {
   initBallDrag();
   applyTheme(store.getSettings().theme);
   renderAll();
-  // 挂载后立即检测一次角色卡绑定（不等轮询）
-  checkCharacterBind();
+  // 安装即显示悬浮球，同步静默状态
+  applyActive();
 }
 
 function buildPanelHTML() {
@@ -174,6 +138,7 @@ function buildPanelHTML() {
   <div class="fs-panel-header">
     <div class="fs-title"><i class="fa-solid fa-dice-d20"></i>命运沙盘</div>
     <div class="fs-skin-ctrl">
+      <button class="fs-icon-btn" id="fs-silent-btn" title="静默模式：关闭后停止发送/接收信息"><i class="fa-solid fa-volume-high"></i></button>
       <button class="fs-icon-btn" id="fs-theme-btn" title="日夜切换"><i class="fa-solid fa-moon"></i></button>
     </div>
   </div>
@@ -261,6 +226,9 @@ function bindEvents() {
     applyTheme(next);
   });
 
+  // 静默模式开关（顶栏）
+  $("#fs-silent-btn").addEventListener("click", toggleSilent);
+
   // 关闭
   $("#fs-close-btn").addEventListener("click", () => togglePanel(false));
 
@@ -274,15 +242,36 @@ function bindEvents() {
   // 文件导入
   $("#fs-import-file").addEventListener("change", handleImport);
 
-  // 监听角色卡切换 + 楼层监控
-  setInterval(() => { checkCharacterBind(); monitorFloor(); }, 1500);
-  checkCharacterBind();
+  // 定时同步静默状态 + 楼层监控（不再识别角色卡）
+  setInterval(() => { applyActive(); monitorFloor(); }, 1500);
+  applyActive();
+}
+
+// ---------- 静默模式切换 ----------
+function toggleSilent() {
+  const next = !store.isSilent();
+  store.setSilent(next);
+  applyActive();
+  syncSilentBtn();
+  showModal(next ? "🔇 静默模式已开启" : "🔊 静默模式已关闭",
+    next ? "<p>插件已进入静默模式：不再发送或接收任何信息（AI 生成、楼层监控均已暂停）。</p>"
+         : "<p>插件已恢复运行，重新开始发送与接收信息。</p>");
+}
+
+function syncSilentBtn() {
+  const btn = $("#fs-silent-btn");
+  if (!btn) return;
+  const silent = isSilent();
+  btn.classList.toggle("active", silent);
+  const icon = btn.querySelector("i");
+  if (icon) icon.className = silent ? "fa-solid fa-volume-xmark" : "fa-solid fa-volume-high";
+  btn.title = silent ? "静默模式已开启（点击恢复）" : "静默模式：关闭后停止发送/接收信息";
 }
 
 // ---------- 100 层防死循环监控 ----------
 let floorSettling = false;
 function monitorFloor() {
-  if (!activeCharacter || floorSettling) return;
+  if (isSilent() || floorSettling) return; // 静默时暂停楼层监控
   try {
     const ctx = getSTContext();
     if (!ctx) return;
@@ -463,6 +452,7 @@ async function actionSpecial() {
     if (!hint) return;
     store.consumeCard("异界特典");
     closeModal();
+    if (isSilent()) { warn("🔇 静默模式", "插件处于静默模式，已停止发送/接收信息。请先关闭静默模式。"); return; }
     showLoading();
     try {
       const result = await AI.generateWorldSpecial(hint);
@@ -526,6 +516,7 @@ async function handleImport(e) {
 
 // 通用世界生成
 async function doGenerateWorld(opts = {}) {
+  if (isSilent()) { warn("🔇 静默模式", "插件处于静默模式，已停止发送/接收信息。请先关闭静默模式。"); return; }
   showLoading();
   try {
     const draw = Draw.drawWorld({ difficulty: opts.difficulty || store.getDifficulty(), fandom: opts.fandom });
@@ -544,6 +535,7 @@ async function doGenerateWorld(opts = {}) {
 
 // 终局结算（opts.forced = 100层强制触发）
 async function actionSettle(opts = {}) {
+  if (isSilent()) { warn("🔇 静默模式", "插件处于静默模式，已停止发送/接收信息。请先关闭静默模式。"); return; }
   showLoading("「界域演化中...」", opts.forced
     ? "⚠️ 已抵达第 100 层界域深渊，命运沙盘正在强制收回因果线..."
     : "正在消耗【创世微尘】，为新世界编织因果与召唤勇者...");
@@ -776,6 +768,16 @@ function renderSettings() {
   pane.innerHTML = `
     <h2 class="fs-sub"><i class="fa-solid fa-scroll"></i>法则镌刻 · 设置</h2>
     <div class="fs-set-block">
+      <label><i class="fa-solid fa-volume-xmark"></i>静默模式</label>
+      <div class="fs-silent-row">
+        <span style="font-size:.88em;color:var(--fs-ink-soft)">开启后插件不再发送 / 接收任何信息（AI 生成、楼层监控暂停）。</span>
+        <label class="fs-toggle">
+          <input type="checkbox" id="fs-silent-toggle" ${isSilent() ? 'checked' : ''}>
+          <span class="fs-toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+    <div class="fs-set-block">
       <label><i class="fa-solid fa-scale-unbalanced"></i>审判 · 任务判定标准 Prompt</label>
       <textarea id="fs-prompt-judge">${esc(s.prompts.judge || "")}</textarea>
     </div>
@@ -812,6 +814,13 @@ function renderSettings() {
   $$('input[name="fs-apimode"]', pane).forEach(r => r.addEventListener("change", () => {
     $("#fs-external-fields").style.display = r.value === "external" ? "" : "none";
   }));
+
+  // 静默模式开关（设置分栏）
+  $("#fs-silent-toggle").addEventListener("change", e => {
+    store.setSilent(e.target.checked);
+    applyActive();
+    syncSilentBtn();
+  });
 
   // 保存
   $("#fs-save-settings").addEventListener("click", () => {
@@ -905,18 +914,9 @@ export function init() {
     const link = el("link", { rel: "stylesheet", href: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" });
     document.head.appendChild(link);
   }
-  if (_inited) { checkCharacterBind(); return; }
+  if (_inited) { applyActive(); syncSilentBtn(); return; }
   _inited = true;
   mount();
-
-  // 若上下文暂未就绪（酒馆还在启动），延迟重试直到能读到角色卡
-  let retry = 0;
-  const attempt = () => {
-    checkCharacterBind();
-    const name = getCurrentCharacterName();
-    if (!name && retry < 20) { retry++; setTimeout(attempt, 800); }
-  };
-  setTimeout(attempt, 100);
 }
 
 // ---------- 卸载钩子 ----------
