@@ -485,31 +485,41 @@ function renderSandbox() {
   pane.appendChild(footer);
 }
 
-// 通用强效填值函数：显式清空并重写四大文本框（即使锁定 disabled 也强制写入）
+// 通用强效填值函数：底层 DOM 直接强写（即使 locked/disabled/readonly 也强制赋值）
 function updateSandboxUI(worldData) {
   if (!worldData) worldData = store.getWorld();
   if (!worldData) return;
-  const targetDOMs = {
-    goal: document.querySelector("#sandbox-goal-text"),
-    difficulty: document.querySelector("#sandbox-difficulty-text"),
-    disaster: document.querySelector("#sandbox-disaster-text"),
-    hero: document.querySelector("#sandbox-hero-text")
+  // 双选择器兜底：稳定 id + data-field/data-key 属性
+  const fields = {
+    goal: document.querySelector('#sandbox-goal-text, [data-key="goal"], [data-field="goal"]'),
+    difficulty: document.querySelector('#sandbox-difficulty-text, [data-key="difficultyText"], [data-field="difficulty"]'),
+    disaster: document.querySelector('#sandbox-disaster-text, [data-key="disaster"], [data-field="disaster"]'),
+    hero: document.querySelector('#sandbox-hero-text, [data-key="hero"], [data-field="hero"]')
   };
-  if (targetDOMs.goal) targetDOMs.goal.value = worldData.goal || "";
-  if (targetDOMs.difficulty) targetDOMs.difficulty.value = worldData.difficultyText || worldData.difficulty || "";
-  if (targetDOMs.disaster) targetDOMs.disaster.value = worldData.disaster || "";
-  if (targetDOMs.hero) targetDOMs.hero.value = typeof worldData.hero === "object" ? JSON.stringify(worldData.hero, null, 2) : (worldData.hero || "");
-  // 自动触发 change/input 事件，确保视图层绝对同步
-  Object.values(targetDOMs).forEach(ta => {
-    if (!ta) return;
-    try { ta.dispatchEvent(new Event("input", { bubbles: true })); } catch (_) {}
-    try { ta.dispatchEvent(new Event("change", { bubbles: true })); } catch (_) {}
-  });
+  const values = {
+    goal: worldData.goal || "",
+    difficulty: worldData.difficultyText || worldData.difficulty || "",
+    disaster: worldData.disaster || "",
+    hero: typeof worldData.hero === "object" ? JSON.stringify(worldData.hero, null, 2) : (worldData.hero || "")
+  };
+  for (const [key, element] of Object.entries(fields)) {
+    if (element) {
+      // 哪怕是 readonly / disabled 状态，也强制赋值
+      element.value = values[key];
+      // 手动派发 input 和 change 事件，防止响应式框架拦截
+      try { element.dispatchEvent(new Event("input", { bubbles: true })); } catch (_) {}
+      try { element.dispatchEvent(new Event("change", { bubbles: true })); } catch (_) {}
+    } else {
+      console.error(`[命运沙盘] 找不到字段 ${key} 对应的 DOM 元素！`);
+    }
+  }
+  // 同步刷新官方扩展提示词，确保酒馆内存里的沙盘数据随时最新
+  registerExtensionPrompt();
   console.log("[命运沙盘] 沙盘 UI 已强制刷新：", {
-    goal: worldData.goal ? "√" : "空",
-    difficulty: (worldData.difficultyText || worldData.difficulty) ? "√" : "空",
-    disaster: worldData.disaster ? "√" : "空",
-    hero: worldData.hero ? "√" : "空"
+    goal: values.goal ? "√" : "空",
+    difficulty: values.difficulty ? "√" : "空",
+    disaster: values.disaster ? "√" : "空",
+    hero: values.hero ? "√" : "空"
   });
 }
 
@@ -1150,7 +1160,7 @@ function showAdminPanel() {
 // ---------- 入口 ----------
 let _inited = false;
 
-// ---------- 命运沙盘内容 → 每轮对话上下文注入（核心 · 双保险 + 多钩子 + 延时注册） ----------
+// ---------- 命运沙盘内容 → 每轮对话上下文注入（核心 · 官方 setExtensionPrompt + 兜底钩子） ----------
 // 构建沙盘四字段的注入文本（接受可选 world 参数）
 function buildSandboxContext(world) {
   if (!world) world = store.getWorld();
@@ -1166,20 +1176,57 @@ function buildSandboxContext(world) {
 - 契约勇者（契约伙伴）：${hero}`;
 }
 
-// 在聊天补全前把沙盘状态注入上下文（双保险：chat 数组最前插 system + full_prompt 文本拼接兜底）
+const EXT_PROMPT_KEY = "fate-sandbox-sandbox-state";
+
+// 主方案：酒馆官方 Extension Prompt 注入（提示词查看器 100% 可见）
+function registerExtensionPrompt() {
+  try {
+    const ST = getSTContext();
+    if (ST && typeof ST.setExtensionPrompt === "function") {
+      if (isSilent()) {
+        // 静默模式：清空注入
+        ST.setExtensionPrompt(EXT_PROMPT_KEY, "", 0, 0);
+        console.log("[命运沙盘] 静默模式，已清空扩展提示词");
+        return true;
+      }
+      const world = store.getWorld();
+      if (!world || (!world.goal && !world.hero && !world.disaster)) {
+        console.warn("[命运沙盘] 当前没有生效的世界线数据，暂不挂载扩展提示词");
+        return false;
+      }
+      const promptContent = buildSandboxContext(world);
+      console.log("[命运沙盘] 正在注入的数据内容为:", promptContent);
+      // 参数: key, value, position(0=System 顶部/角色设定前), depth
+      ST.setExtensionPrompt(EXT_PROMPT_KEY, promptContent, 0, 0);
+      console.log("[命运沙盘] 注入状态: 成功（setExtensionPrompt 已挂载）");
+      return true;
+    }
+    console.warn("[命运沙盘] 未找到 setExtensionPrompt，触发备用注入方案");
+    return false;
+  } catch (e) {
+    console.warn("[命运沙盘] setExtensionPrompt 挂载异常：", e);
+    return false;
+  }
+}
+
+// 备用兜底：监听 chat_completion_prompt_ready，直接修改 eventData
 function injectSandboxContext(eventData) {
   try {
-    if (isSilent()) return; // 静默模式不注入
+    if (isSilent()) return;
     const world = store.getWorld();
-    // 校验：只要有任一核心字段存在即触发注入，不严苛判定全空
     if (!world || (!world.goal && !world.hero && !world.disaster)) {
       console.warn("[命运沙盘] 当前没有生效的世界线数据，暂不注入上下文");
       return;
     }
+    // 每轮发送前都刷新一次官方扩展提示词，确保内容最新
+    registerExtensionPrompt();
+
     const injectionContent = buildSandboxContext(world);
 
-    // 保险 1：eventData.chat 数组存在 → 插到最前排
+    // 兜底 1：eventData.chat 数组 → 插到最前排
     if (Array.isArray(eventData.chat)) {
+      // 防止重复注入：先移除旧的沙盘 system 消息
+      eventData.chat = eventData.chat.filter(m => !(m && typeof m.content === "string" && m.content.startsWith("[命运沙盘·当前任务状态]")));
       eventData.chat.unshift({
         role: "system",
         content: injectionContent,
@@ -1188,39 +1235,53 @@ function injectSandboxContext(eventData) {
       });
       console.log("[命运沙盘] 成功通过 eventData.chat 注入沙盘上下文！");
     }
-    // 保险 2：eventData.full_prompt 是字符串 → 直接拼接在最顶部
+    // 兜底 2：eventData.system_prompt 字符串 → 拼接顶部
+    else if (typeof eventData.system_prompt === "string") {
+      eventData.system_prompt = `${injectionContent}\n\n${eventData.system_prompt}`;
+      console.log("[命运沙盘] 成功通过 system_prompt 拼接注入沙盘上下文！");
+    }
+    // 兜底 3：eventData.full_prompt 字符串 → 拼接顶部
     else if (typeof eventData.full_prompt === "string") {
       eventData.full_prompt = `${injectionContent}\n\n${eventData.full_prompt}`;
-      console.log("[命运沙盘] 成功通过 full_prompt 文本拼接注入沙盘上下文！");
-    } else {
-      console.warn("[命运沙盘] 注入失败：eventData 无 chat 数组也无 full_prompt 字符串");
+      console.log("[命运沙盘] 成功通过 full_prompt 拼接注入沙盘上下文！");
     }
+    console.log("[命运沙盘注入校验]", eventData);
   } catch (e) {
     console.warn("[命运沙盘] 上下文注入异常：", e);
   }
 }
 
-// 注册上下文注入钩子：同时监听 CHAT_COMPLETION_PROMPT_READY 与 BEFORE_COMPLETION，兼容主流酒馆版本
+// 注册：官方 Extension Prompt 优先 + 兜底事件钩子（同时监听多事件，兼容主流酒馆版本）
 let _injectionRegistered = false;
 function registerContextInjection() {
   try {
     const ctx = getSTContext();
-    const eventSource = ctx && ctx.eventSource;
-    const event_types = ctx && ctx.event_types;
-    if (!eventSource || !event_types) {
-      return false; // 上下文尚未就绪
+    if (!ctx) return false;
+
+    // 主方案：官方 setExtensionPrompt（只要 API 存在即标记就位）
+    const hasExtPrompt = typeof ctx.setExtensionPrompt === "function";
+    if (hasExtPrompt) {
+      registerExtensionPrompt();
     }
-    // 主钩子
-    if (event_types.CHAT_COMPLETION_PROMPT_READY) {
-      eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, injectSandboxContext);
+
+    // 兜底：事件钩子
+    const eventSource = ctx.eventSource;
+    const event_types = ctx.event_types;
+    if (eventSource && event_types) {
+      if (event_types.CHAT_COMPLETION_PROMPT_READY) {
+        eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, injectSandboxContext);
+      }
+      if (event_types.BEFORE_COMPLETION) {
+        eventSource.on(event_types.BEFORE_COMPLETION, injectSandboxContext);
+      }
     }
-    // 兜底钩子（部分酒馆版本/某些触发路径）
-    if (event_types.BEFORE_COMPLETION) {
-      eventSource.on(event_types.BEFORE_COMPLETION, injectSandboxContext);
+
+    if (hasExtPrompt || (eventSource && event_types)) {
+      _injectionRegistered = true;
+      console.log("[命运沙盘] 上下文注入监听器已就位", hasExtPrompt ? "（setExtensionPrompt 主方案）" : "（事件钩子兜底方案）");
+      return true;
     }
-    _injectionRegistered = true;
-    console.log("[命运沙盘] 上下文注入监听器已就位");
-    return true;
+    return false;
   } catch (e) {
     console.warn("[命运沙盘] 上下文注入监听器注册失败：", e);
     return false;
