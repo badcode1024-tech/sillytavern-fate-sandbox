@@ -108,10 +108,39 @@ function applyActive() {
 }
 
 // ---------- 挂载 DOM ----------
+// 当前插件版本指纹（与 manifest.json 保持一致）：
+// 用于「双实例防御」——扩展目录存在两份副本（或浏览器缓存旧模块）时，
+// 先挂载的旧版本会让新版 mount() 静默退出，导致用户点击的仍是旧代码按钮
+// （症状：生成世界"成功"但文本框空白、上下文不注入，与修复前一模一样）。
+const FS_VERSION = "1.9.2";
+
+// 仅移除 DOM 节点（不动数据，供版本接管 / 卸载复用）
+function removeDOM() {
+  ["#fs-ball", "#fs-panel", "#fs-zoom-mask", "#fs-modal-mask", "#fs-import-file"].forEach(sel => {
+    const n = $(sel);
+    if (n) n.remove();
+  });
+}
+
 function mount() {
-  if (document.getElementById("fs-ball")) return; // 幂等保护
+  // 双实例防御：已有 DOM 且属于本版本 → 幂等返回
+  const existing = document.getElementById("fs-ball");
+  if (existing) {
+    if (existing.dataset.fsVersion === FS_VERSION) return;
+    // 属于旧版本实例 → 拆除其 DOM，由本版本接管 UI 控制权
+    console.warn(`[命运沙盘] 检测到旧版本实例（v${existing.dataset.fsVersion || "?"}）已挂载，新版 v${FS_VERSION} 正在接管 UI。建议删除旧副本并重启酒馆。`);
+    removeDOM();
+    // 弹窗 DOM 在本函数后半段才创建，延迟到挂载完成后提示
+    setTimeout(() => {
+      showModal("⚠️ 检测到插件旧版本实例",
+        `<p>扩展目录中似乎存在两份「命运沙盘」（或浏览器缓存了旧模块）。</p>
+         <p>新版已接管界面，但旧实例的后台定时器可能仍在运行。</p>
+         <p style="color:var(--fs-accent)">请删除旧副本文件夹后，重启酒馆（或 Ctrl+F5 硬刷新）。</p>`);
+    }, 200);
+  }
   // 悬浮球（安装即显示，兵棋外观；未交互前不回缩，点击后缩回露 2/5）
   const ball = el("div", { class: "fs-ball", id: "fs-ball" });
+  ball.dataset.fsVersion = FS_VERSION;
   ball.innerHTML = `
     <img class="fs-ball-img" src="${assetUrl('assets/ball_pawn.png')}" alt="命运沙盘" draggable="false">
     <button class="fs-ball-close" id="fs-ball-close" title="关闭悬浮球（可在酒馆扩展中重新开启）"><i class="fa-solid fa-xmark"></i></button>`;
@@ -135,6 +164,7 @@ function mount() {
 
   // 主面板
   const panel = el("div", { class: "fs-panel", id: "fs-panel", style: "display:none" });
+  panel.dataset.fsVersion = FS_VERSION;
   panel.innerHTML = buildPanelHTML();
   document.body.appendChild(panel);
 
@@ -585,6 +615,7 @@ async function actionSpecial() {
       showModal("「界域演化失败」", `<p>${esc(e.message)}</p><button class="fs-wax" id="fs-retry" data-act="special">再次生成</button>`);
     }
     renderSandbox();
+    updateSandboxUI();           // 双保险：renderSandbox 重建 DOM 后再强写一次
   });
 }
 
@@ -660,6 +691,7 @@ async function doGenerateInitialWorld() {
       `<p>已为你开启第一个 <b>F 级</b>命运任务，四大核心设定已填入沙盘。</p>
        <p style="color:var(--fs-accent)">请前往「命运沙盘」查看任务目标，开启你的救世之旅。</p>`);
     renderAll();
+    updateSandboxUI();         // 双保险：renderAll 重建 DOM 后再强写一次文本框
   } catch (e) {
     closeModal();
     showModal("「界域创生失败」", `<p>${esc(e.message)}</p><button class="fs-wax" id="fs-retry">重试</button>`);
@@ -680,6 +712,7 @@ async function doGenerateWorld(opts = {}) {
     closeModal();
     showModal("✦ 世界已重塑", "新的因果线已编织完成。");
     renderSandbox();
+    updateSandboxUI();         // 双保险：renderSandbox 重建 DOM 后再强写一次
   } catch (e) {
     closeModal();
     showModal("「界域演化失败」", `<p>${esc(e.message)}</p><button class="fs-wax" id="fs-retry">再次手动结算</button>`);
@@ -747,6 +780,7 @@ async function actionSettle(opts = {}) {
     showModal(star > 0 ? "✦ 任务判定" : "☠ 任务判定",
       verdict + forcedNote + `<p style="color:var(--fs-accent)">请在酒馆对话框输入「我要进入下一个任务」开启新任务。</p>`, true);
     renderAll();
+    updateSandboxUI();            // 双保险：renderAll 重建 DOM 后再强写一次
   } catch (e) {
     closeModal();
     showModal("「界域演化失败」", `<p>${esc(e.message)}</p><button class="fs-wax" id="fs-retry">再次手动结算</button>`);
@@ -1306,6 +1340,37 @@ function ensureContextInjection() {
   tryRegister();
 }
 
+// ---------- 诊断工具：浏览器控制台输入 FateSandbox.debug() ----------
+// 输出运行版本 / 存储宿主 / store 中四大字段 / DOM 文本框实际值 / 注入通道状态
+export function debug() {
+  const world = store.getWorld() || {};
+  const domState = {};
+  for (const f of FIELD_DEFS) {
+    const ta = document.getElementById(f.id);
+    domState[f.key] = ta ? `长度${(ta.value || "").length}` : "DOM不存在";
+  }
+  let hostType = "unknown";
+  try {
+    const ctx = getSTContext();
+    if (ctx && ctx.extensionSettings && ctx.extensionSettings.__fateSandbox) hostType = "extensionSettings（官方推荐，可持久化）";
+    else if (typeof window !== "undefined" && window.__fateSandbox) hostType = "window（降级内存）";
+    else hostType = "内存兜底";
+  } catch (e) { hostType = "检测失败"; }
+  const info = {
+    运行版本: FS_VERSION,
+    存储宿主: hostType,
+    静默模式: store.isSilent(),
+    "store·任务目标": (world.goal || "").slice(0, 40) || "（空）",
+    "store·世界难度": (world.difficultyText || "").slice(0, 40) || "（空）",
+    "store·灾厄形态": (world.disaster || "").slice(0, 40) || "（空）",
+    "store·契约勇者": (world.hero || "").slice(0, 40) || "（空）",
+    "DOM·文本框": domState,
+    setExtensionPrompt可用: typeof getSTContext()?.setExtensionPrompt === "function",
+  };
+  console.log("[命运沙盘·诊断]", info);
+  return info;
+}
+
 export function init() {
   // 注入 FontAwesome（若无）
   if (!$('link[href*="font-awesome"]') && !$('link[href*="fontawesome"]')) {
@@ -1314,6 +1379,7 @@ export function init() {
   }
   if (_inited) { applyActive(); syncSilentBtn(); return; }
   _inited = true;
+  console.log(`[命运沙盘] 插件加载，运行版本 v${FS_VERSION}。如遇异常请在控制台执行 FateSandbox.debug()`);
   mount();
   // 注册每轮对话的沙盘上下文注入（延时/循环注册 + load 兜底）
   ensureContextInjection();
@@ -1324,10 +1390,7 @@ export function init() {
 
 // ---------- 卸载钩子 ----------
 export function onRemove() {
-  ["#fs-ball", "#fs-panel", "#fs-zoom-mask", "#fs-modal-mask", "#fs-import-file"].forEach(sel => {
-    const n = $(sel);
-    if (n) n.remove();
-  });
+  removeDOM();
   // 清空挂载在酒馆上的官方扩展提示词，避免卸载后仍向上下文注入残留内容
   try {
     const ST = getSTContext();

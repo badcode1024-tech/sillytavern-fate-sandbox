@@ -305,9 +305,10 @@ ${heroText ? "\n【勇者抽取结果】\n" + heroText : ""}
 }
 
 function buildHeroPrompt(draw) {
+  const heroText = draw && draw.hero ? Draw.heroToPromptText(draw.hero) : "";
   return `请根据以下勇者抽取结果，润色生成一个完整的 SillyTavern YAML 格式角色卡（包含 name、description、personality、scenario、first_mes 等字段），勇者名字需符合世界背景。
 
-${heroToPrompt(draw)}
+${heroText}
 
 要求：
 1. 名字贴合世界背景，富有记忆点。
@@ -365,23 +366,69 @@ ${memory || "（无）"}
 function parseWorldResult(text, draw) {
   // 尝试从 AI 返回中提取四个字段；若失败则用抽卡原始数据兜底
   const result = { goal: "", difficultyText: "", disaster: "", hero: "" };
-  // 用正则/标记提取，宽松匹配
+  // 用正则/标记提取，宽松匹配；hero 为多行 YAML，需多行提取
   const g = extractField(text, ["任务目标", "终焉之劫"]);
   const d = extractField(text, ["世界难度", "灾厄侵蚀度"]);
   const dis = extractField(text, ["末世类型", "灾厄形态"]);
-  const h = extractField(text, ["勇者角色卡", "契约勇者"]);
-  result.goal = g || `任务目标：${draw.disaster.name}之下，勇者需拯救世界`;
-  result.difficultyText = d || `${draw.diff.level}级 · ${draw.diff.name}`;
-  result.disaster = dis || draw.disaster.name;
-  result.hero = h || heroToPrompt(draw);
+  const h = extractField(text, ["勇者角色卡", "契约勇者"], { multiline: true });
+  result.goal = g || `任务目标：${draw.disaster?.name || ""}之下，勇者需拯救世界`;
+  result.difficultyText = d || `${draw.diff?.level || "?"}级 · ${draw.diff?.name || ""}`;
+  result.disaster = dis || draw.disaster?.name || "（末世形态尚未显现）";
+  // 兜底：用抽卡的勇者结构化文本（此前误调用不存在的 heroToPrompt，必然抛 ReferenceError）
+  result.hero = h || (draw.hero ? Draw.heroToPromptText(draw.hero) : "（勇者尚未契约，可使用【法则篡改】补充角色卡）");
   return result;
 }
 
-function extractField(text, labels) {
+// 四大字段的全部已知标签（用于识别"下一个字段开始"，截断多行提取）
+const WORLD_FIELD_LABELS = ["任务目标", "终焉之劫", "世界难度", "灾厄侵蚀度", "末世类型", "灾厄形态", "勇者角色卡", "契约勇者"];
+
+// 清理 markdown 代码块围栏（```yaml 等）与行首的加粗/列表装饰符号
+function cleanLinePrefix(s) {
+  return String(s || "").replace(/```[a-zA-Z0-9_-]*/g, "").replace(/^[\s*#>\-·：:、【】\[\]]+/, "");
+}
+
+// 判断某行是否是另一个字段的标签行（行首附近出现已知标签）
+function isLabelLine(line) {
+  const s = String(line || "").trim();
+  if (!s) return false;
+  return WORLD_FIELD_LABELS.some(lb => new RegExp(`^[【\\[\\*#\\s>\\-]*${lb}`, "i").test(s));
+}
+
+/**
+ * 从 AI 返回文本中提取字段内容。
+ * @param {string} text  AI 返回全文
+ * @param {string[]} labels  该字段的可能标签名
+ * @param {object} opts  { multiline: true } 时收集标签行之后的多个行（适配 YAML 角色卡）
+ */
+function extractField(text, labels, opts = {}) {
+  const multiline = !!opts.multiline;
+  const lines = String(text || "").split(/\r?\n/);
   for (const label of labels) {
-    const re = new RegExp(`${label}[：:【】\\s]*([^\\n]{4,})`, "i");
-    const m = text.match(re);
-    if (m) return m[1].trim();
+    const re = new RegExp(`${label}\\s*[：:）)】\\]]?\\s*`, "i");
+    for (let i = 0; i < lines.length; i++) {
+      const lm = lines[i].match(re);
+      if (!lm) continue;
+      // 标签同行内容
+      const sameLine = cleanLinePrefix(lines[i].slice(lm.index + lm[0].length)).trim();
+      if (!multiline) {
+        if (sameLine.length >= 4) return sameLine;
+        // 同行为空 → 向下找第一个非标签的非空行
+        for (let j = i + 1; j < lines.length; j++) {
+          if (isLabelLine(lines[j])) return "";
+          const t = cleanLinePrefix(lines[j]).trim();
+          if (t.length >= 4) return t;
+        }
+        return "";
+      }
+      // 多行模式：收集到下一个字段标签行或文本末尾（适配 YAML 角色卡）
+      const out = sameLine ? [sameLine] : [];
+      for (let j = i + 1; j < lines.length; j++) {
+        if (isLabelLine(lines[j])) break;
+        out.push(cleanLinePrefix(lines[j]));
+      }
+      const joined = out.join("\n").trim();
+      if (joined.length >= 4) return joined;
+    }
   }
   return "";
 }
