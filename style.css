@@ -1,25 +1,10 @@
 /* =========================================================
    命运沙盘 Fate Sandbox —— 样式表
-   主题：Morandi 大地复古 + 暗夜废土，日/夜双皮肤
+   主题：暗色 Morandi 高沉浸（固定，无日夜切换）
    ========================================================= */
 
-/* ---------- 主题变量 ---------- */
+/* ---------- 主题变量（固定暗色 Morandi） ---------- */
 #fs-ball, #fs-panel, #fs-zoom-mask, #fs-modal-mask {
-  --fs-paper: #e9dcc0;
-  --fs-paper-2: #ddcba6;
-  --fs-ink: #3a2a1a;
-  --fs-ink-soft: #6b5436;
-  --fs-line: #a9875a;
-  --fs-accent: #8c3b22;
-  --fs-accent-2: #b5812f;
-  --fs-gold: #b8893a;
-  --fs-shadow: rgba(60, 40, 20, .35);
-  --fs-panel: rgba(240, 228, 200, .88);
-  --fs-bg: #f4ebd9;
-  --fs-danger: #7a2a1a;
-}
-
-#fs-ball.fs-night, #fs-panel.fs-night, #fs-zoom-mask.fs-night, #fs-modal-mask.fs-night {
   --fs-paper: #211a12;
   --fs-paper-2: #2c2318;
   --fs-ink: #e7d6b4;
@@ -31,6 +16,7 @@
   --fs-shadow: rgba(0, 0, 0, .6);
   --fs-panel: rgba(40, 32, 22, .92);
   --fs-bg: #1d1816;
+  --fs-danger: #7a2a1a;
 }
 
 /* ---------- 悬浮球（圆角正方形 · 无边框，参考记忆宫殿尺寸） ---------- */
@@ -115,20 +101,20 @@
 #fs-panel.open { transform: translateX(0); }
 #fs-panel * { box-sizing: border-box; }
 
-/* 羊皮纸背景图层（日/夜切换由 --fs-bg-image 变量控制） */
+/* 羊皮纸背景图层（固定暗色，燃烧边羊皮纸） */
 #fs-panel::before {
   content: "";
   position: absolute;
   inset: 0;
-  background-image: var(--fs-bg-image);
+  background-image: url("../assets/bg/parchment_v2.png");
   background-size: cover;
   background-position: center;
-  opacity: .35;
-  mix-blend-mode: multiply;
+  opacity: .18;
+  mix-blend-mode: screen;
+  filter: brightness(.6) sepia(.4);
   pointer-events: none;
   z-index: 0;
 }
-#fs-panel.fs-night::before { opacity: .18; mix-blend-mode: screen; filter: brightness(.6) sepia(.4); }
 #fs-panel > * { position: relative; z-index: 1; }
 
 /* 顶栏 */
@@ -258,7 +244,7 @@
 #fs-panel .fs-field-sub { font-size: .78em; color: var(--fs-ink-soft); font-weight: 400; }
 #fs-panel .fs-field textarea {
   width: 100%; min-height: 72px; resize: vertical;
-  background: rgba(255,250,235,.35);
+  background: rgba(0,0,0,.25);
   color: var(--fs-ink);
   border: 1px dashed var(--fs-line);
   border-radius: 8px;
@@ -266,7 +252,6 @@
   font-family: inherit; font-size: .9em; line-height: 1.5;
   white-space: pre-wrap;
 }
-#fs-panel.fs-night .fs-field textarea { background: rgba(0,0,0,.2); }
 #fs-panel .fs-field textarea:disabled { cursor: not-allowed; opacity: .9; }
 #fs-panel .fs-lock-tag {
   position: absolute; top: 12px; right: 14px;
@@ -464,7 +449,7 @@
 /* 弹窗内输入框 */
 #fs-modal-mask input, #fs-modal-mask textarea {
   width: 100%;
-  background: rgba(255,250,235,.4);
+  background: rgba(0,0,0,.25);
   color: var(--fs-ink);
   border: 1px solid var(--fs-line);
   border-radius: 8px;
@@ -472,7 +457,6 @@
   font-family: inherit; font-size: .9em;
   margin-bottom: 8px;
 }
-#fs-panel.fs-night input, #fs-panel.fs-night textarea { background: rgba(0,0,0,.2); }
 
 /* ---------- 救世录 ---------- */
 #fs-panel .fs-saga {
@@ -492,7 +476,7 @@
 #fs-panel .fs-set-block label { display: flex; align-items: center; gap: 7px; font-weight: 700; color: var(--fs-accent); margin-bottom: 6px; }
 #fs-panel .fs-set-block textarea {
   width: 100%; min-height: 80px; resize: vertical;
-  background: rgba(255,250,235,.35); color: var(--fs-ink);
+  background: rgba(0,0,0,.25); color: var(--fs-ink);
   border: 1px solid var(--fs-line); border-radius: 8px; padding: 10px 12px;
   font-family: inherit; font-size: .9em; line-height: 1.5;
 }
@@ -505,12 +489,11 @@
 }
 #fs-panel .fs-model-row select {
   flex: 1; padding: 8px 10px;
-  background: rgba(255,250,235,.4); color: var(--fs-ink);
+  background: rgba(0,0,0,.25); color: var(--fs-ink);
   border: 1px solid var(--fs-line); border-radius: 8px;
   font-family: inherit; font-size: .9em;
   height: 36px;
 }
-#fs-panel.fs-night .fs-model-row select { background: rgba(0,0,0,.2); }
 #fs-panel .fs-model-row .fs-wax { white-space: nowrap; height: 36px; }
 
 /* 静默模式行 + 滑动开关 */
@@ -544,7 +527,7 @@
 #fs-panel .fs-admin-row { margin-bottom: 6px; }
 #fs-panel .fs-admin-row input {
   width: 100%; padding: 6px 8px;
-  background: rgba(255,250,235,.4); color: var(--fs-ink);
+  background: rgba(0,0,0,.25); color: var(--fs-ink);
   border: 1px solid var(--fs-line); border-radius: 6px; font-size: .85em;
 }
 #fs-panel .fs-admin-sub { font-size: .82em; color: var(--fs-accent-2); margin: 8px 0 4px; font-weight: 700; }
@@ -559,20 +542,18 @@
 }
 #fs-panel .fs-admin-item input {
   width: 100%; padding: 6px 8px; margin-bottom: 5px;
-  background: rgba(255,250,235,.4); color: var(--fs-ink);
+  background: rgba(0,0,0,.25); color: var(--fs-ink);
   border: 1px solid var(--fs-line); border-radius: 6px; font-size: .85em;
   font-weight: 700;
 }
 #fs-panel .fs-admin-item textarea {
   width: 100%; min-height: 44px; resize: vertical;
   padding: 6px 8px;
-  background: rgba(255,250,235,.3); color: var(--fs-ink-soft);
+  background: rgba(0,0,0,.25); color: var(--fs-ink-soft);
   border: 1px solid var(--fs-line); border-radius: 6px; font-size: .8em;
   line-height: 1.5;
   font-family: inherit;
 }
-#fs-panel.fs-night .fs-admin-item input,
-#fs-panel.fs-night .fs-admin-item textarea { background: rgba(0,0,0,.2); }
 
 /* ---------- 响应式 ---------- */
 @media (max-width: 480px) {
