@@ -23,16 +23,18 @@ function defaultState() {
     archives: [],               // 救世录：[{title, summary, story, world, ts}]
     settings: {
       prompts: {
-        judge: "",    // 审判（任务判定标准 Prompt）
-        world: "",    // 创世神谕（任务生成 Prompt）
-        saga: "",     // 史官笔触（归档故事生成 Prompt）
-        save: ""      // 铭刻法则（保存修改 Prompt）
+        judge: P.DEFAULT_PROMPTS.judge,   // 审判（任务判定标准 Prompt）
+        world: P.DEFAULT_PROMPTS.world,   // 创世神谕（任务生成 Prompt）
+        saga: P.DEFAULT_PROMPTS.saga,     // 史官笔触（归档故事生成 Prompt）
+        save: P.DEFAULT_PROMPTS.save      // 铭刻法则（保存修改 Prompt）
       },
       theme: "day",             // day | night
       apiMode: "host",          // host（复用酒馆主 API）| external
       externalApi: { baseUrl: "", key: "", model: "" }
     },
     silent: false,              // 静默模式：关闭后不发送/接收信息
+    ballHidden: false,          // 悬浮球被用户手动关闭
+    ballInteracted: false,      // 用户是否已首次点击悬浮球（点击前不回缩）
     pools: null,                // 卡池覆盖（后台编辑后存此，null 表示用默认）
     pendingJudge: null,         // 终局结算判定缓存（防止重复结算）
     floor: 0,                   // 当前任务在酒馆内已进行的楼层数（100 层强制结算用）
@@ -43,20 +45,44 @@ function defaultState() {
 // 获取持久化存储对象（SillyTavern 扩展 settings）
 function getStore() {
   // 兼容不同版本酒馆的 settings 扩展方式
-  const ext = (typeof SillyTavern !== "undefined" && SillyTavern.getContext)
-    ? SillyTavern.getContext()
-    : (typeof window !== "undefined" ? window : {});
+  const ext = getContextObject();
   if (!ext.__fateSandbox) ext.__fateSandbox = defaultState();
+  // 迁移：补齐缺失的默认 Prompt（老存档兼容）
+  const s = ext.__fateSandbox.settings;
+  if (s && s.prompts) {
+    for (const k of ["judge", "world", "saga", "save"]) {
+      if (!s.prompts[k]) s.prompts[k] = P.DEFAULT_PROMPTS[k];
+    }
+  }
   return ext.__fateSandbox;
+}
+
+// 多版本兼容：获取酒馆上下文对象作为存储宿主
+function getContextObject() {
+  if (typeof SillyTavern !== "undefined") {
+    if (typeof SillyTavern.getContext === "function") {
+      const c = SillyTavern.getContext();
+      if (c) return c;
+    }
+    if (SillyTavern.extensionSettings || SillyTavern.characters) return SillyTavern;
+  }
+  if (typeof window !== "undefined") {
+    for (const key of ["SillyTavern", "ST", "context"]) {
+      const w = window[key];
+      if (w) {
+        if (typeof w.getContext === "function") { const c = w.getContext(); if (c) return c; }
+        if (w.extensionSettings || w.characters) return w;
+      }
+    }
+  }
+  return (typeof window !== "undefined" ? window : {});
 }
 
 // 同步写回 settings（触发酒馆保存）
 function persist() {
   try {
-    if (typeof SillyTavern !== "undefined" && SillyTavern.getContext) {
-      const ctx = SillyTavern.getContext();
-      ctx.saveSettingsDebounced && ctx.saveSettingsDebounced();
-    }
+    const ctx = getContextObject();
+    ctx.saveSettingsDebounced && ctx.saveSettingsDebounced();
   } catch (e) { /* 忽略 */ }
 }
 
@@ -103,6 +129,12 @@ export const store = {
   isSilent() { return !!getStore().silent; },
   setSilent(v) { getStore().silent = !!v; persist(); },
 
+  // 悬浮球显隐与首触状态
+  isBallHidden() { return !!getStore().ballHidden; },
+  setBallHidden(v) { getStore().ballHidden = !!v; persist(); },
+  isBallInteracted() { return !!getStore().ballInteracted; },
+  setBallInteracted(v) { getStore().ballInteracted = !!v; persist(); },
+
   // 卡池覆盖
   getPoolsOverride() { return getStore().pools; },
   setPoolsOverride(p) { getStore().pools = p; persist(); },
@@ -123,11 +155,9 @@ export const store = {
   // 卸载清空（不留残余）
   clearAll() {
     try {
-      if (typeof SillyTavern !== "undefined" && SillyTavern.getContext) {
-        const ctx = SillyTavern.getContext();
-        delete ctx.__fateSandbox;
-        ctx.saveSettingsDebounced && ctx.saveSettingsDebounced();
-      }
+      const ctx = getContextObject();
+      delete ctx.__fateSandbox;
+      ctx.saveSettingsDebounced && ctx.saveSettingsDebounced();
     } catch (e) {
       if (typeof window !== "undefined") delete window.__fateSandbox;
     }

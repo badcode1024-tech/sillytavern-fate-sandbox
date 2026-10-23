@@ -5,7 +5,7 @@
  */
 import { store } from "./store.js";
 import * as Draw from "./draw.js";
-import { REWARD_TABLE } from "./pools.js";
+import { REWARD_TABLE, DEFAULT_PROMPTS } from "./pools.js";
 
 // ---------- 读取酒馆上下文（多版本兼容） ----------
 function getContext() {
@@ -60,6 +60,36 @@ function readMemoryPalace() {
   } catch (e) { return ""; }
 }
 
+// ---------- 外接独立 API：拉取模型列表 ----------
+// 请求 OpenAI 兼容接口的 /models 端点，返回模型 id 数组
+export async function fetchExternalModels() {
+  const s = store.getSettings();
+  const api = s.externalApi || {};
+  if (!api.baseUrl) throw new Error("请先填写外接 API 地址（Base URL）。");
+  const base = api.baseUrl.replace(/\/$/, "");
+  // 兼容两种端点：/models 或 /v1/models
+  const urls = [base + "/models", base + "/v1/models"];
+  const headers = {
+    "Content-Type": "application/json",
+    ...(api.key ? { Authorization: `Bearer ${api.key}` } : {})
+  };
+  let lastErr;
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { method: "GET", headers });
+      if (!res.ok) { lastErr = new Error(`HTTP ${res.status}`); continue; }
+      const data = await res.json();
+      const list = data?.data || data?.models || [];
+      const ids = list.map(m => m?.id || m?.model || m).filter(x => typeof x === "string" && x);
+      if (ids.length) return ids;
+      lastErr = new Error("接口未返回模型列表");
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw new Error("拉取模型失败：" + (lastErr?.message || lastErr) + "（请确认地址正确、Key 有效、接口支持 /models）");
+}
+
 // ---------- 外接独立 API 调用 ----------
 async function callExternalApi(prompt, opts = {}) {
   const s = store.getSettings();
@@ -72,34 +102,85 @@ async function callExternalApi(prompt, opts = {}) {
     temperature: opts.temperature ?? 0.8,
     max_tokens: opts.maxTokens ?? 2048
   };
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(api.key ? { Authorization: `Bearer ${api.key}` } : {})
-    },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) throw new Error(`外部 API 返回错误：HTTP ${res.status}`);
+  let res;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(api.key ? { Authorization: `Bearer ${api.key}` } : {})
+      },
+      body: JSON.stringify(body)
+    });
+  } catch (e) {
+    throw new Error("网络请求失败：" + (e?.message || e));
+  }
+  if (!res.ok) {
+    let detail = "";
+    try { const j = await res.json(); detail = j?.error?.message || JSON.stringify(j); } catch (_) {}
+    throw new Error(`外部 API 返回错误：HTTP ${res.status}${detail ? " —— " + detail : ""}`);
+  }
   const data = await res.json();
   return data?.choices?.[0]?.message?.content || "";
 }
 
-// ---------- 复用酒馆主 API ----------
+// ---------- 复用酒馆主 API（官方静默生成接口） ----------
 async function callHostApi(prompt, opts = {}) {
   const ctx = getContext();
-  if (!ctx) throw new Error("无法读取酒馆上下文。");
-  const generate = ctx.generate || ctx.generateQuietPrompt || null;
-  if (typeof generate !== "function") {
-    throw new Error("当前酒馆版本不支持静默生成，请切换为外接 API。");
+  if (!ctx) throw new Error("无法读取酒馆上下文（SillyTavern 全局对象未就绪）。");
+
+  // 优先使用官方 generateQuiet（静默生成，不污染聊天，返回 Promise<string>）
+  if (typeof ctx.generateQuiet === "function") {
+    try {
+      const text = await ctx.generateQuiet(prompt, {
+        quietToLoud: false,
+        skipWIAN: true,
+        ...(opts.temperature != null ? { temperature: opts.temperature } : {})
+      });
+      return normalizeText(text);
+    } catch (e) {
+      throw new Error("酒馆静默生成失败：" + (e?.message || e));
+    }
   }
-  // 静默生成，不污染聊天
-  const text = await generate("quiet", prompt, {
-    quietToLoud: false,
-    skipWIAN: true,
-    ...(opts.temperature != null ? { temperature: opts.temperature } : {})
-  });
-  return (typeof text === "string" ? text : (text?.text || ""));
+
+  // 备选：generate(type, prompt, options)
+  if (typeof ctx.generate === "function") {
+    try {
+      const text = await ctx.generate("quiet", prompt, {
+        quietToLoud: false,
+        skipWIAN: true,
+        ...(opts.temperature != null ? { temperature: opts.temperature } : {})
+      });
+      return normalizeText(text);
+    } catch (e) {
+      throw new Error("酒馆生成接口调用失败：" + (e?.message || e));
+    }
+  }
+
+  // 兜底：旧版 generateQuietPrompt
+  if (typeof ctx.generateQuietPrompt === "function") {
+    try {
+      const text = await ctx.generateQuietPrompt(prompt, false, false);
+      return normalizeText(text);
+    } catch (e) {
+      throw new Error("酒馆 generateQuietPrompt 调用失败：" + (e?.message || e));
+    }
+  }
+
+  throw new Error("当前酒馆版本未暴露可用的生成接口，请切换为「外接独立 API」。");
+}
+
+// 归一化 AI 返回文本
+function normalizeText(v) {
+  if (typeof v === "string") return v;
+  if (v && typeof v === "object") {
+    if (typeof v.text === "string") return v.text;
+    if (typeof v.content === "string") return v.content;
+    if (Array.isArray(v.content)) {
+      return v.content.map(c => c?.text || c?.content || "").join("");
+    }
+  }
+  return String(v ?? "");
 }
 
 // ---------- 统一入口 ----------
@@ -271,7 +352,7 @@ function extractField(text, labels) {
   return "";
 }
 
-// ---------- 兜底默认提示词 ----------
-const DEFAULT_WORLD_PROMPT = `你是一位末世沙盘设计师。请依据以下随机抽取要素，生成一个完整的高沉浸世界设定，输出四个字段：任务目标（终焉之劫）、世界难度（灾厄侵蚀度）、末世类型（灾厄形态）、勇者角色卡（契约勇者，YAML 格式）。`;
-const DEFAULT_JUDGE_PROMPT = `你是命运沙盘的审判者。根据当前世界与上下文，判定勇者任务是否完成。`;
-const DEFAULT_SAGA_PROMPT = `你是史官。将本次救世历程书写为一段可传唱的史诗故事。`;
+// ---------- 兜底默认提示词（统一取自 pools.DEFAULT_PROMPTS） ----------
+const DEFAULT_WORLD_PROMPT = DEFAULT_PROMPTS.world;
+const DEFAULT_JUDGE_PROMPT = DEFAULT_PROMPTS.judge;
+const DEFAULT_SAGA_PROMPT = DEFAULT_PROMPTS.saga;

@@ -38,6 +38,28 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// ---------- 资源路径解析 ----------
+// 插件内的相对路径（如 assets/cards/xx.jpg）需转为酒馆可访问的绝对路径。
+// SillyTavern 扩展资源统一挂在 /scripts/extensions/<插件名>/ 下。
+let _pluginBase = null;
+function assetUrl(rel) {
+  if (!rel) return rel;
+  if (/^(https?:|data:|blob:)/i.test(rel)) return rel; // 已是绝对/内联
+  if (rel.startsWith("/")) return rel;
+  if (_pluginBase == null) {
+    // 尝试从已加载的样式/脚本中推断插件根路径
+    const probe = document.querySelector('link[href*="fate-sandbox"], script[src*="fate-sandbox"]');
+    if (probe) {
+      const href = probe.href || probe.src || "";
+      _pluginBase = href.replace(/\/[^\/]*$/, "") + "/";
+    } else {
+      // 兜底：按标准扩展路径拼接
+      _pluginBase = "/scripts/extensions/fate-sandbox/";
+    }
+  }
+  return _pluginBase + rel.replace(/^\.\//, "");
+}
+
 // ---------- 获取酒馆上下文（多版本兼容，仅楼层监控/AI 用） ----------
 function getSTContext() {
   if (typeof SillyTavern !== "undefined") {
@@ -62,30 +84,49 @@ function getSTContext() {
 // ---------- 静默模式 ----------
 function isSilent() { return store.isSilent(); }
 
-// 悬浮球激活状态：安装即显示，静默时仅样式变灰，仍可点击打开面板切换开关
+// 悬浮球状态：显隐 + 回缩
+function applyBallState() {
+  const ball = $("#fs-ball");
+  if (!ball) return;
+  const hidden = store.isBallHidden();
+  const interacted = store.isBallInteracted();
+  ball.style.display = hidden ? "none" : "flex";
+  // 只有首次点击/拖拽后才缩回露 2/5；未交互时完整贴边显示
+  ball.classList.toggle("fs-docked", hidden ? false : interacted);
+  ball.classList.toggle("fs-silent", isSilent());
+  ball.title = hidden ? "" : (isSilent() ? "命运沙盘 · 静默模式已开启" : "命运沙盘");
+}
+
+// 悬浮球激活状态：静默样式同步 + 扩展面板开关同步
 function applyActive() {
   const silent = isSilent();
-  const ball = $("#fs-ball");
   const panel = $("#fs-panel");
-  if (ball) {
-    ball.style.display = "flex";
-    ball.classList.toggle("fs-silent", silent);
-    ball.title = silent ? "命运沙盘 · 静默模式已开启" : "命运沙盘";
-  }
-  if (panel) {
-    panel.classList.toggle("fs-silent", silent);
-  }
+  if (panel) panel.classList.toggle("fs-silent", silent);
   syncSilentBtn();
+  applyBallState();
+  syncExtToggle();
 }
 
 // ---------- 挂载 DOM ----------
 function mount() {
   if (document.getElementById("fs-ball")) return; // 幂等保护
-  // 悬浮球（安装即显示，不再识别角色卡）
+  // 悬浮球（安装即显示，兵棋外观；未交互前不回缩，点击后缩回露 2/5）
   const ball = el("div", { class: "fs-ball", id: "fs-ball" });
-  ball.innerHTML = `<div class="fs-ball-inner"><i class="fa-solid fa-dice-d20"></i></div>`;
-  ball.addEventListener("click", e => { if (!ball.dataset.dragged) togglePanel(); ball.dataset.dragged = ""; });
+  ball.innerHTML = `
+    <img class="fs-ball-img" src="${assetUrl('assets/ball_pawn.png')}" alt="命运沙盘" draggable="false">
+    <button class="fs-ball-close" id="fs-ball-close" title="关闭悬浮球（可在酒馆扩展中重新开启）"><i class="fa-solid fa-xmark"></i></button>`;
+  ball.addEventListener("click", e => {
+    if (ball.dataset.dragged) { ball.dataset.dragged = ""; return; }
+    if (e.target.closest("#fs-ball-close")) return;
+    if (!store.isBallInteracted()) { store.setBallInteracted(true); }
+    togglePanel();
+  });
   document.body.appendChild(ball);
+  $("#fs-ball-close").addEventListener("click", e => {
+    e.stopPropagation();
+    store.setBallHidden(true);
+    applyBallState();
+  });
 
   // 主面板
   const panel = el("div", { class: "fs-panel", id: "fs-panel", style: "display:none" });
@@ -166,6 +207,7 @@ function initBallDrag() {
   const ball = $("#fs-ball");
   let sx, sy, bx, by, dragging = false;
   ball.addEventListener("pointerdown", e => {
+    if (e.target.closest("#fs-ball-close")) return;
     dragging = true;
     ball.dataset.dragged = "";
     sx = e.clientX; sy = e.clientY;
@@ -187,7 +229,12 @@ function initBallDrag() {
   });
   ball.addEventListener("pointerup", e => {
     dragging = false;
-    snapBall();
+    if (ball.dataset.dragged) {
+      // 拖拽过 = 已交互，之后允许缩回
+      store.setBallInteracted(true);
+      snapBall();
+    }
+    ball.dataset.dragged = "";
   });
 }
 
@@ -197,8 +244,7 @@ function snapBall() {
   const vw = window.innerWidth, vh = window.innerHeight;
   const cx = r.left + r.width / 2;
   const ny = Math.max(0, Math.min(vh - r.height, r.top));
-  const targetLeft = cx < vw / 2 ? 0 : vw - r.width;
-  ball.style.transition = "left .35s cubic-bezier(.25,.8,.25,1), top .35s cubic-bezier(.25,.8,.25,1)";
+  ball.style.transition = "left .35s cubic-bezier(.25,.8,.25,1), top .35s cubic-bezier(.25,.8,.25,1), right .35s cubic-bezier(.25,.8,.25,1)";
   ball.style.top = ny + "px";
   if (cx < vw / 2) {
     // 左侧吸附：露出 2/5，隐藏 3/5
@@ -258,6 +304,45 @@ function toggleSilent() {
          : "<p>插件已恢复运行，重新开始发送与接收信息。</p>");
 }
 
+// ---------- 酒馆扩展面板注入「显示悬浮球」开关 ----------
+let _extToggleInjected = false;
+function syncExtToggle() {
+  const cb = document.getElementById("fs-ext-ball-toggle");
+  if (cb) cb.checked = !store.isBallHidden();
+  if (_extToggleInjected) return;
+  // 尝试注入到酒馆扩展设置容器
+  const container = document.getElementById("extensions_settings2") || document.getElementById("extensions_settings");
+  if (!container) return; // 未找到则下次轮询重试
+  const block = el("div", { class: "extension_settings", id: "fs-extension-block" });
+  block.innerHTML = `
+    <div class="inline-drawer">
+      <div class="inline-drawer-toggle inline-drawer-header">
+        <b>命运沙盘 Fate Sandbox</b>
+        <div class="inline-drawer-icon fa-solid fa-caret-down down"></div>
+      </div>
+      <div class="inline-drawer-content" style="padding:8px 12px">
+        <label class="checkbox_label" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="fs-ext-ball-toggle" ${!store.isBallHidden() ? "checked" : ""}>
+          <span>显示悬浮球</span>
+        </label>
+        <label class="checkbox_label" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px">
+          <input type="checkbox" id="fs-ext-silent-toggle" ${isSilent() ? "checked" : ""}>
+          <span>静默模式（停止发送/接收信息）</span>
+        </label>
+      </div>
+    </div>`;
+  container.appendChild(block);
+  block.querySelector("#fs-ext-ball-toggle").addEventListener("change", e => {
+    store.setBallHidden(!e.target.checked);
+    applyBallState();
+  });
+  block.querySelector("#fs-ext-silent-toggle").addEventListener("change", e => {
+    store.setSilent(e.target.checked);
+    applyActive();
+  });
+  _extToggleInjected = true;
+}
+
 function syncSilentBtn() {
   const btn = $("#fs-silent-btn");
   if (!btn) return;
@@ -303,7 +388,11 @@ function togglePanel(force) {
   const panel = $("#fs-panel");
   const open = force !== undefined ? force : !panel.classList.contains("open");
   if (open) { panel.classList.add("open"); renderAll(); }
-  else panel.classList.remove("open");
+  else {
+    panel.classList.remove("open");
+    // 已交互过的悬浮球在面板关闭后缩回屏幕，只露 2/5
+    if (store.isBallInteracted()) snapBall();
+  }
 }
 
 function switchPanel(idx) {
@@ -325,13 +414,21 @@ function warn(title, text) { showModal("⚠️ " + title, `<p>${esc(text)}</p>`)
 
 // ---------- 主题 ----------
 function applyTheme(theme) {
+  const isNight = theme === "night";
   const ball = $("#fs-ball");
   const panel = $("#fs-panel");
-  [ball, panel].forEach(n => { if (n) n.classList.toggle("fs-night", theme === "night"); });
-  // 羊皮纸背景：日间 v1 / 夜间燃烧边 v2（存档卡片/弹窗区域沿用）
-  if (panel) panel.style.setProperty("--fs-bg-image", `url("${theme === "night" ? ASSETS.bgParchmentV2 : ASSETS.bgParchmentV1}")`);
+  const zoom = $("#fs-zoom-mask");
+  const modal = $("#fs-modal-mask");
+  // 所有 UI 节点统一切换 fs-night；同时同步 body 上的 theme-dark 类（供外部联动）
+  [ball, panel, zoom, modal].forEach(n => { if (n) n.classList.toggle("fs-night", isNight); });
+  if (document.body) {
+    document.body.classList.toggle("theme-dark", isNight);
+    document.body.classList.toggle("theme-light", !isNight);
+  }
+  // 羊皮纸背景：日间 v1 / 夜间燃烧边 v2
+  if (panel) panel.style.setProperty("--fs-bg-image", `url("${isNight ? ASSETS.bgParchmentV2 : ASSETS.bgParchmentV1}")`);
   const icon = $("#fs-theme-btn i");
-  if (icon) icon.className = theme === "night" ? "fa-solid fa-sun" : "fa-solid fa-moon";
+  if (icon) icon.className = isNight ? "fa-solid fa-sun" : "fa-solid fa-moon";
 }
 
 // ---------- 渲染 ----------
@@ -514,6 +611,34 @@ async function handleImport(e) {
   e.target.value = "";
 }
 
+// 判断是否处于「初始空档」：无归档、无进行中世界
+function isInitialEmpty() {
+  const world = store.getWorld();
+  const hasWorld = !!(world.goal || world.disaster || world.hero || world.difficultyText);
+  return store.getArchives().length === 0 && !hasWorld;
+}
+
+// 初次开启任务：自动生成 F 级初始世界并填入四大文本框
+async function doGenerateInitialWorld() {
+  showLoading("「界域创生中...」", "侦测到空白沙盘，正在为你创生第一个 F 级命运世界...");
+  try {
+    store.setDifficulty("F");
+    const draw = Draw.drawWorld({ difficulty: "F", fandom: false });
+    const result = await AI.generateWorldWithDraw(draw, {});
+    store.setWorld(result);
+    store.setFloor(0);
+    closeModal();
+    showModal("✦ 命运世界已创生",
+      `<p>已为你开启第一个 <b>F 级</b>命运任务，四大核心设定已填入沙盘。</p>
+       <p style="color:var(--fs-accent)">请前往「命运沙盘」查看任务目标，开启你的救世之旅。</p>`);
+    renderAll();
+  } catch (e) {
+    closeModal();
+    showModal("「界域创生失败」", `<p>${esc(e.message)}</p><button class="fs-wax" id="fs-retry">重试</button>`);
+    $("#fs-retry").addEventListener("click", () => { closeModal(); doGenerateInitialWorld(); });
+  }
+}
+
 // 通用世界生成
 async function doGenerateWorld(opts = {}) {
   if (isSilent()) { warn("🔇 静默模式", "插件处于静默模式，已停止发送/接收信息。请先关闭静默模式。"); return; }
@@ -536,6 +661,13 @@ async function doGenerateWorld(opts = {}) {
 // 终局结算（opts.forced = 100层强制触发）
 async function actionSettle(opts = {}) {
   if (isSilent()) { warn("🔇 静默模式", "插件处于静默模式，已停止发送/接收信息。请先关闭静默模式。"); return; }
+
+  // 初始为空 → 等同于「第一次开启任务」，自动生成 F 级初始世界
+  if (isInitialEmpty()) {
+    await doGenerateInitialWorld();
+    return;
+  }
+
   showLoading("「界域演化中...」", opts.forced
     ? "⚠️ 已抵达第 100 层界域深渊，命运沙盘正在强制收回因果线..."
     : "正在消耗【创世微尘】，为新世界编织因果与召唤勇者...");
@@ -664,10 +796,13 @@ function renderShop() {
     <div class="fs-shop-group-title"><i class="fa-solid fa-layer-group"></i>常规卡牌组</div>
     <div class="fs-shop-grid" id="fs-shop-normal"></div>
     <div class="fs-shop-group-title" style="margin-top:20px"><i class="fa-solid fa-wand-sparkles"></i>同人卡牌组</div>
-    <div class="fs-shop-grid" id="fs-shop-fan"></div>`;
+    <div class="fs-shop-grid" id="fs-shop-fan"></div>
+    <div class="fs-shop-group-title" style="margin-top:20px"><i class="fa-solid fa-flag"></i>越级挑战卡组</div>
+    <div class="fs-shop-grid" id="fs-shop-challenge"></div>`;
 
   buildShopGroup("normal", "#fs-shop-normal");
   buildShopGroup("fandom", "#fs-shop-fan");
+  buildShopGroup("difficulty", "#fs-shop-challenge");
 }
 
 function buildShopGroup(category, selector) {
@@ -677,10 +812,12 @@ function buildShopGroup(category, selector) {
   cards.forEach(card => {
     const c = el("div", { class: "fs-card" });
     const art = card.img
-      ? `<img class="fs-card-img" src="${card.img}" alt="${esc(card.name)}" loading="lazy">`
+      ? `<img class="fs-card-img" src="${assetUrl(card.img)}" alt="${esc(card.name)}" loading="lazy">`
       : `<i class="fa-solid ${card.icon}"></i>`;
+    // 越级挑战卡：公用途图片，叠加等级标签
+    const levelTag = card.level ? `<span class="fs-card-level">${esc(card.level)}</span>` : "";
     c.innerHTML = `
-      <div class="fs-card-art">${art}</div>
+      <div class="fs-card-art">${art}${levelTag}</div>
       <div class="fs-card-name">${esc(card.name)}</div>
       <div class="fs-card-cost"><i class="fa-solid fa-gem"></i>${card.cost}</div>
       <button class="fs-redeem"><i class="fa-solid fa-arrows-rotate"></i> 结晶转化</button>`;
@@ -696,7 +833,7 @@ function openRedeem(card) {
   }
   pendingRedeem = card;
   $("#fs-zoom-icon").innerHTML = card.img
-    ? `<img class="fs-card-img" src="${card.img}" alt="${esc(card.name)}">`
+    ? `<img class="fs-card-img" src="${assetUrl(card.img)}" alt="${esc(card.name)}">`
     : `<i class="fa-solid ${card.icon}"></i>`;
   $("#fs-zoom-name").textContent = card.name;
   $("#fs-zoom-cost").innerHTML = `<i class="fa-solid fa-gem"></i> ${card.cost}`;
@@ -768,6 +905,16 @@ function renderSettings() {
   pane.innerHTML = `
     <h2 class="fs-sub"><i class="fa-solid fa-scroll"></i>法则镌刻 · 设置</h2>
     <div class="fs-set-block">
+      <label><i class="fa-solid fa-eye"></i>悬浮球显示</label>
+      <div class="fs-silent-row">
+        <span style="font-size:.88em;color:var(--fs-ink-soft)">关闭后隐藏悬浮球（也可在酒馆「扩展」设置中重新开启）。</span>
+        <label class="fs-toggle">
+          <input type="checkbox" id="fs-ball-toggle" ${!store.isBallHidden() ? 'checked' : ''}>
+          <span class="fs-toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+    <div class="fs-set-block">
       <label><i class="fa-solid fa-volume-xmark"></i>静默模式</label>
       <div class="fs-silent-row">
         <span style="font-size:.88em;color:var(--fs-ink-soft)">开启后插件不再发送 / 接收任何信息（AI 生成、楼层监控暂停）。</span>
@@ -803,7 +950,13 @@ function renderSettings() {
       <div id="fs-external-fields" style="${s.apiMode === 'external' ? '' : 'display:none'}">
         <input id="fs-ext-url" placeholder="API 地址（如 https://api.example.com）" value="${esc(s.externalApi?.baseUrl || '')}">
         <input id="fs-ext-key" placeholder="API Key（可选）" value="${esc(s.externalApi?.key || '')}">
-        <input id="fs-ext-model" placeholder="模型名（如 gpt-4o-mini）" value="${esc(s.externalApi?.model || '')}">
+        <div class="fs-model-row">
+          <select id="fs-ext-model-select" style="flex:1">
+            ${(s.externalApi?.model) ? `<option value="${esc(s.externalApi.model)}">${esc(s.externalApi.model)}</option>` : '<option value="">（请先拉取模型）</option>'}
+          </select>
+          <button class="fs-wax alt" id="fs-fetch-models"><i class="fa-solid fa-download"></i> 拉取模型</button>
+        </div>
+        <input id="fs-ext-model" placeholder="模型名（也可手动输入）" value="${esc(s.externalApi?.model || '')}">
       </div>
     </div>
 
@@ -815,11 +968,50 @@ function renderSettings() {
     $("#fs-external-fields").style.display = r.value === "external" ? "" : "none";
   }));
 
+  // 拉取模型列表
+  $("#fs-fetch-models").addEventListener("click", async () => {
+    const btn = $("#fs-fetch-models");
+    const baseUrl = $("#fs-ext-url").value.trim();
+    const key = $("#fs-ext-key").value.trim();
+    if (!baseUrl) { warn("拉取模型", "请先填写外接 API 地址（Base URL）。"); return; }
+    // 先把当前输入的 baseUrl/key 临时写入，供 fetchExternalModels 读取
+    const tmp = { baseUrl, key, model: "" };
+    const orig = s.externalApi;
+    s.externalApi = tmp;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 拉取中...';
+    try {
+      const models = await AI.fetchExternalModels();
+      const sel = $("#fs-ext-model-select");
+      sel.innerHTML = models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
+      // 默认选中第一个
+      if (models.length) { sel.value = models[0]; $("#fs-ext-model").value = models[0]; }
+      showModal("✦ 模型已拉取", `<p>共获取 <b>${models.length}</b> 个可用模型，请在下拉菜单中选择。</p>`);
+    } catch (e) {
+      warn("拉取模型失败", e.message || String(e));
+    } finally {
+      s.externalApi = orig;
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-download"></i> 拉取模型';
+    }
+  });
+
+  // 模型下拉选择 → 同步到 model 输入框
+  $("#fs-ext-model-select").addEventListener("change", e => {
+    $("#fs-ext-model").value = e.target.value;
+  });
+
   // 静默模式开关（设置分栏）
   $("#fs-silent-toggle").addEventListener("change", e => {
     store.setSilent(e.target.checked);
     applyActive();
     syncSilentBtn();
+  });
+
+  // 悬浮球显隐开关（设置分栏）
+  $("#fs-ball-toggle").addEventListener("change", e => {
+    store.setBallHidden(!e.target.checked);
+    applyBallState();
   });
 
   // 保存

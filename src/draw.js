@@ -98,16 +98,33 @@ export function worldToPromptText(draw) {
 
 /**
  * 组装勇者卡的结构化描述（供 AI 润色为 YAML）
+ * 每个外观/性格条目都附带完整 desc，确保 AI 生成不跑偏。
  */
 export function heroToPromptText(hero) {
   const a = hero.appearance;
   const p = hero.personality;
+  const AD = P.HERO_APPEARANCE_DESC;
+  const PD = P.HERO_PERSONALITY_DESC;
+  const d = (map, key, val) => {
+    if (typeof val === "object" && val !== null) return val.desc || val.name || "";
+    const m = map && map[key];
+    return m && m[val] ? m[val] : "";
+  };
   const lines = [];
   lines.push(`勇者所在世界：${hero.world || "（由世界背景决定）"}`);
-  lines.push(`发色：${a.hairColor}；瞳色：${a.eyeColor}；面部：${a.facialFeatures}；发型：${a.hairStyle}`);
-  lines.push(`身材：${a.bodyBuild.type}（${a.bodyBuild.desc}）；身高：${a.height.type}（${a.height.desc}）`);
-  lines.push(`日常服饰：${a.styleDaily}；战斗服饰：${a.styleCombat}；高阶服饰：${a.styleAdvanced}`);
-  lines.push(`表面性格（正面）：${p.positive.join("、")}；负面：${p.negative}；中性：${p.neutral}`);
+  lines.push(`发色：${a.hairColor}（${d(AD, "hairColor", a.hairColor)}）`);
+  lines.push(`瞳色：${a.eyeColor}（${d(AD, "eyeColor", a.eyeColor)}）`);
+  lines.push(`面部：${a.facialFeatures}（${d(AD, "facialFeatures", a.facialFeatures)}）`);
+  lines.push(`发型：${a.hairStyle}（${d(AD, "hairStyle", a.hairStyle)}）`);
+  lines.push(`身材：${a.bodyBuild.type}（${a.bodyBuild.desc}）`);
+  lines.push(`身高：${a.height.type}（${a.height.desc}）`);
+  lines.push(`日常服饰：${a.styleDaily}（${d(AD, "styleDaily", a.styleDaily)}）`);
+  lines.push(`战斗服饰：${a.styleCombat}（${d(AD, "styleCombat", a.styleCombat)}）`);
+  lines.push(`高阶服饰：${a.styleAdvanced}（${d(AD, "styleAdvanced", a.styleAdvanced)}）`);
+  const posTxt = p.positive.map(x => `${x}（${d(PD, "positive", x)}）`).join("、");
+  lines.push(`表面性格（正面）：${posTxt}`);
+  lines.push(`表面性格（负面）：${p.negative}（${d(PD, "negative", p.negative)}）`);
+  lines.push(`表面性格（中性）：${p.neutral}（${d(PD, "neutral", p.neutral)}）`);
   lines.push(`核心性格：${hero.core.name}（${hero.core.desc}）`);
   return lines.join("\n");
 }
