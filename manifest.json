@@ -6,7 +6,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "Fate Sandbox Team",
-  "version": "1.2.0",
+  "version": "1.4.1",
   "homePage": "https://github.com/your-name/fate-sandbox",
   "auto_update": true,
   "license": "MIT",
