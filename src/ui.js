@@ -126,6 +126,11 @@ function mount() {
     e.stopPropagation();
     store.setBallHidden(true);
     applyBallState();
+    // 同步扩展面板与设置分栏开关
+    const ext = $("#fs-ext-ball-toggle");
+    if (ext) ext.checked = false;
+    const inner = $("#fs-ball-toggle");
+    if (inner) inner.checked = false;
   });
 
   // 主面板
@@ -307,10 +312,8 @@ function toggleSilent() {
 // ---------- 酒馆扩展面板注入「显示悬浮球」开关 ----------
 let _extToggleInjected = false;
 function syncExtToggle() {
-  const cb = document.getElementById("fs-ext-ball-toggle");
-  if (cb) cb.checked = !store.isBallHidden();
+  // 仅注入一次；注入后由 checkbox 的 change 事件驱动状态，不再每次轮询覆盖 checked
   if (_extToggleInjected) return;
-  // 尝试注入到酒馆扩展设置容器
   const container = document.getElementById("extensions_settings2") || document.getElementById("extensions_settings");
   if (!container) return; // 未找到则下次轮询重试
   const block = el("div", { class: "extension_settings", id: "fs-extension-block" });
@@ -332,13 +335,20 @@ function syncExtToggle() {
       </div>
     </div>`;
   container.appendChild(block);
-  block.querySelector("#fs-ext-ball-toggle").addEventListener("change", e => {
-    store.setBallHidden(!e.target.checked);
+  const ballCb = block.querySelector("#fs-ext-ball-toggle");
+  ballCb.addEventListener("change", e => {
+    const show = e.target.checked;
+    store.setBallHidden(!show);
     applyBallState();
+    // 同步设置分栏里的同名开关
+    const inner = $("#fs-ball-toggle");
+    if (inner) inner.checked = show;
   });
   block.querySelector("#fs-ext-silent-toggle").addEventListener("change", e => {
     store.setSilent(e.target.checked);
     applyActive();
+    const inner = $("#fs-silent-toggle");
+    if (inner) inner.checked = e.target.checked;
   });
   _extToggleInjected = true;
 }
@@ -386,10 +396,15 @@ function monitorFloor() {
 
 function togglePanel(force) {
   const panel = $("#fs-panel");
+  if (!panel) return;
   const open = force !== undefined ? force : !panel.classList.contains("open");
-  if (open) { panel.classList.add("open"); renderAll(); }
-  else {
+  if (open) {
+    panel.classList.add("open");
+    panel.style.display = "flex";   // 显式显示（面板挂载时是 display:none）
+    renderAll();
+  } else {
     panel.classList.remove("open");
+    panel.style.display = "none";
     // 已交互过的悬浮球在面板关闭后缩回屏幕，只露 2/5
     if (store.isBallInteracted()) snapBall();
   }
@@ -1006,12 +1021,16 @@ function renderSettings() {
     store.setSilent(e.target.checked);
     applyActive();
     syncSilentBtn();
+    const ext = $("#fs-ext-silent-toggle");
+    if (ext) ext.checked = e.target.checked;
   });
 
   // 悬浮球显隐开关（设置分栏）
   $("#fs-ball-toggle").addEventListener("change", e => {
     store.setBallHidden(!e.target.checked);
     applyBallState();
+    const ext = $("#fs-ext-ball-toggle");
+    if (ext) ext.checked = e.target.checked;
   });
 
   // 保存
@@ -1042,54 +1061,79 @@ function renderSettings() {
 }
 
 // ===== 隐藏管理员：卡池管理后台 =====
+// 有 desc 的条目展示「名称 + 描述」两个字段；纯字符串条目只展示「名称」。
 function showAdminPanel() {
-  showModal("卡池管理后台", `<div id="fs-admin-body" style="max-height:60vh;overflow-y:auto;text-align:left"></div><button class="fs-wax" id="fs-admin-save">保存卡池</button>`, false);
+  showModal("卡池管理后台", `<div id="fs-admin-body" style="max-height:60vh;overflow-y:auto;text-align:left"></div><button class="fs-wax" id="fs-admin-save" style="margin-top:10px">保存卡池</button>`, false);
   const pools = activePools();
   const body = $("#fs-admin-body");
   body.innerHTML = "";
+
   Object.keys(pools).forEach(key => {
     const pool = pools[key];
+    if (!pool || typeof pool !== "object") return;
     const title = el("div", { class: "fs-shop-group-title" }, key);
     body.appendChild(title);
-    // 简化：只展示数组类卡池的可编辑名称/描述
+
+    // 数组卡池（WORLD_TYPE / DIFFICULTY / DISASTER / EVIL / CORE_TRAIT / FANDOM / STAR_CRITERIA）
     if (Array.isArray(pool)) {
       pool.forEach((item, i) => {
-        const row = el("div", { class: "fs-admin-row" });
-        const name = item.name || item.type || item.id;
-        row.innerHTML = `<input data-pool="${key}" data-idx="${i}" data-field="name" value="${esc(name)}">`;
+        const row = el("div", { class: "fs-admin-item" });
+        if (item && typeof item === "object") {
+          const name = item.name || item.type || item.level || item.id || "";
+          const hasDesc = typeof item.desc === "string";
+          row.innerHTML = `
+            <input data-pool="${key}" data-idx="${i}" data-field="name" value="${esc(name)}" placeholder="名称">
+            ${hasDesc ? `<textarea data-pool="${key}" data-idx="${i}" data-field="desc" placeholder="描述">${esc(item.desc)}</textarea>` : ""}`;
+        } else {
+          // 纯字符串条目（数组池中不应出现，兜底只显示名称）
+          row.innerHTML = `<input data-pool="${key}" data-idx="${i}" data-field="name" value="${esc(String(item))}" placeholder="名称">`;
+        }
         body.appendChild(row);
       });
-    } else if (pool && typeof pool === "object") {
-      // 对象卡池（外观/性格）
-      Object.keys(pool).forEach(subKey => {
-        const arr = pool[subKey];
-        if (Array.isArray(arr)) {
-          const subTitle = el("div", { class: "fs-admin-sub" }, `${key}.${subKey}`);
-          body.appendChild(subTitle);
-          arr.forEach((item, i) => {
-            const val = typeof item === "string" ? item : (item.name || item.type || item.id);
-            const row = el("div", { class: "fs-admin-row" });
-            row.innerHTML = `<input data-pool="${key}" data-sub="${subKey}" data-idx="${i}" value="${esc(val)}">`;
-            body.appendChild(row);
-          });
-        }
-      });
+      return;
     }
+
+    // 对象卡池（HERO_APPEARANCE_POOLS / HERO_PERSONALITY_POOLS）
+    Object.keys(pool).forEach(subKey => {
+      const arr = pool[subKey];
+      if (!Array.isArray(arr)) return;
+      const subTitle = el("div", { class: "fs-admin-sub" }, `${key}.${subKey}`);
+      body.appendChild(subTitle);
+      arr.forEach((item, i) => {
+        const row = el("div", { class: "fs-admin-item" });
+        if (item && typeof item === "object") {
+          // 有 desc 的对象条目（如 bodyBuild / heightCategory）
+          const name = item.name || item.type || "";
+          const hasDesc = typeof item.desc === "string";
+          row.innerHTML = `
+            <input data-pool="${key}" data-sub="${subKey}" data-idx="${i}" data-field="name" value="${esc(name)}" placeholder="名称">
+            ${hasDesc ? `<textarea data-pool="${key}" data-sub="${subKey}" data-idx="${i}" data-field="desc" placeholder="描述">${esc(item.desc)}</textarea>` : ""}`;
+        } else {
+          // 纯字符串条目：只显示名称，无 desc（保持原文）
+          row.innerHTML = `
+            <input data-pool="${key}" data-sub="${subKey}" data-idx="${i}" data-field="name" value="${esc(String(item))}" placeholder="名称">`;
+        }
+        body.appendChild(row);
+      });
+    });
   });
+
   $("#fs-admin-save").addEventListener("click", () => {
     // 收集编辑结果，写回覆盖层
     const override = JSON.parse(JSON.stringify(pools));
-    $$("#fs-admin-body input").forEach(inp => {
+    $$("#fs-admin-body [data-pool]").forEach(inp => {
       const { pool, sub, idx, field } = inp.dataset;
-      if (sub) {
-        const arr = override[pool][sub];
-        const item = arr[+idx];
-        if (typeof item === "string") arr[+idx] = inp.value;
-        else item[field || "name"] = inp.value;
+      const val = inp.value;
+      const arr = sub ? override[pool][sub] : override[pool];
+      const item = arr && arr[+idx];
+      if (item == null) return;
+      if (typeof item === "object") {
+        // 对象条目：写 name 或 desc 字段；若 name 字段名是 type，则写 type
+        const nameField = (field === "name") ? ("name" in item ? "name" : ("type" in item ? "type" : "level")) : field;
+        item[nameField] = val;
       } else {
-        const arr = override[pool];
-        const item = arr[+idx];
-        if (item && typeof item === "object") item[field || "name"] = inp.value;
+        // 纯字符串条目：写回字符串
+        if (field === "name") arr[+idx] = val;
       }
     });
     store.setPoolsOverride(override);
