@@ -1,7 +1,7 @@
 /**
  * 命运沙盘 —— 随机抽卡引擎（本地实现）
  * 从卡池中严谨随机抽取并组合生成世界，交由 AI 层润色。
- * 支持：世界背景 / 灾难 / 邪恶势力 / 勇者外观·表面性格·核心性格。
+ * 支持：世界背景 / 同人世界观 / 勇者外观·表面性格·核心性格。
  */
 import * as P from "./pools.js";
 
@@ -35,24 +35,28 @@ function pickN(arr, n) {
 
 /**
  * 抽取完整世界（不含难度，难度由外部传入当前/目标等级）
- * @param {object} opts { difficulty, fandom?, fandomHint? }
+ * 每次只抽取一个世界观，杜绝不同世界观杂糅混淆。
+ * @param {object} opts { difficulty, fandom? }
+ *   - fandom=true：异界锚定卡，仅从 IP_UNIVERSE_POOLS 抽取一个同人世界观，
+ *     不抽原本的 WORLD_TYPE_POOLS，交由 LLM 润色生成完整世界观并匹配当前等级。
+ *   - 否则：仅从 WORLD_TYPE_POOLS 抽取一个世界背景。
  */
 export function drawWorld(opts = {}) {
   const difficulty = opts.difficulty || "F";
-  const world = pickOne(P.WORLD_TYPE_POOLS);
-  const disaster = pickOne(P.DISASTER_POOLS);
-  const evil = pickOne(P.EVIL_FACTION_POOLS);
   const diff = P.DIFFICULTY_POOLS.find(d => d.level === difficulty) || P.DIFFICULTY_POOLS[0];
 
-  let fandom = null;
+  let world;
   if (opts.fandom) {
-    // 异界锚定：从同人卡池抽取；若提供了提示词（异界特典），则用提示词覆盖
-    fandom = opts.fandomHint ? { name: opts.fandomHint, desc: "用户指定的影视/动漫/游戏世界观" } : pickOne(P.FANDOM_POOLS);
+    // 异界锚定：仅从同人世界观卡池抽取一个具体同人世界观，不抽原本世界观卡池
+    world = pickOne(P.IP_UNIVERSE_POOLS);
+  } else {
+    // 常规：仅从世界背景卡池抽取一个世界观（每次只抽一个）
+    world = pickOne(P.WORLD_TYPE_POOLS);
   }
 
   const hero = drawHero({ world: world.name });
 
-  return { world, disaster, evil, diff, fandom, hero };
+  return { world, diff, fandom: !!opts.fandom, hero };
 }
 
 /**
@@ -88,11 +92,10 @@ export function drawHero({ world } = {}) {
  */
 export function worldToPromptText(draw) {
   const parts = [];
-  parts.push(`世界背景：${draw.world.name}（${draw.world.desc}）`);
-  parts.push(`灾厄形态：${draw.disaster.name}（${draw.disaster.desc}）`);
-  parts.push(`邪恶势力：${draw.evil.name}（${draw.evil.desc}）`);
+  const wdesc = draw.world.desc ? `（${draw.world.desc}）` : "";
+  parts.push(`世界背景：${draw.world.name}${wdesc}`);
   parts.push(`灾厄侵蚀度：${draw.diff.level} · ${draw.diff.name}（${draw.diff.desc}）`);
-  if (draw.fandom) parts.push(`同人锚定：${draw.fandom.name}（${draw.fandom.desc}）`);
+  if (draw.fandom) parts.push(`同人锚定：本次世界基于「${draw.world.name}」同人世界观生成，请据此润色一个风格统一、逻辑自洽的完整世界观，并匹配当前灾厄等级。`);
   return parts.join("\n");
 }
 

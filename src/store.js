@@ -39,6 +39,7 @@ function defaultState() {
       externalApi: { baseUrl: "", key: "", model: "" }
     },
     silent: false,              // 静默模式：关闭后不发送/接收信息
+    skin: "light",              // 皮肤：light（日间浅色）| dark（夜间）
     ballHidden: false,          // 悬浮球被用户手动关闭
     ballInteracted: false,      // 用户是否已首次点击悬浮球（点击前不回缩）
     pools: null,                // 卡池覆盖（后台编辑后存此，null 表示用默认）
@@ -157,6 +158,10 @@ export const store = {
   isSilent() { return !!getStore().silent; },
   setSilent(v) { getStore().silent = !!v; persist(); },
 
+  // 皮肤（日间浅色 / 夜间）
+  getSkin() { return getStore().skin || "light"; },
+  setSkin(v) { getStore().skin = v === "dark" ? "dark" : "light"; persist(); },
+
   // 悬浮球显隐与首触状态
   isBallHidden() { return !!getStore().ballHidden; },
   setBallHidden(v) { getStore().ballHidden = !!v; persist(); },
@@ -179,6 +184,18 @@ export const store = {
 
   // 破产保护
   bankrupt() { getStore().crystal = 0; persist(); },
+
+  // 一键初始化：所有存档数据归零（保留皮肤偏好，避免界面突变）
+  resetAll() {
+    const keepSkin = store.getSkin();
+    const fresh = defaultState();
+    const host = getSettingsHost();
+    if (host) host.__fateSandbox = fresh;
+    else _memStore = fresh;
+    if (keepSkin === "dark") fresh.skin = "dark";
+    persist();
+    return fresh;
+  },
 
   // 卸载清空（不留残余）
   clearAll() {
@@ -203,11 +220,10 @@ export function activePools() {
   return {
     WORLD_TYPE_POOLS: P.WORLD_TYPE_POOLS,
     DIFFICULTY_POOLS: P.DIFFICULTY_POOLS,
-    DISASTER_POOLS: P.DISASTER_POOLS,
-    EVIL_FACTION_POOLS: P.EVIL_FACTION_POOLS,
     HERO_APPEARANCE_POOLS: P.HERO_APPEARANCE_POOLS,
     HERO_PERSONALITY_POOLS: P.HERO_PERSONALITY_POOLS,
     HERO_CORE_TRAIT_POOLS: P.HERO_CORE_TRAIT_POOLS,
-    FANDOM_POOLS: P.FANDOM_POOLS
+    FANDOM_POOLS: P.FANDOM_POOLS,
+    IP_UNIVERSE_POOLS: P.IP_UNIVERSE_POOLS
   };
 }

@@ -256,7 +256,7 @@ export async function generateWorldSpecial(fandomHint) {
   const worldPrompt = s.prompts.world || DEFAULT_WORLD_PROMPT;
   const prompt = `${worldPrompt}\n\n【异界特典 · 用户指定世界观】\n请围绕以下用户指定 IP/世界观生成完整世界：${fandomHint}`;
   const text = await generateWithRetry(prompt, { temperature: 0.9, maxTokens: 2048 });
-  return parseWorldResult(text, { world: { name: fandomHint }, disaster: { name: "" }, evil: { name: "" }, diff: { level: store.getDifficulty(), name: "" }, fandom: { name: fandomHint }, hero: null });
+  return parseWorldResult(text, { world: { name: fandomHint }, diff: { level: store.getDifficulty(), name: "" }, fandom: true, hero: null });
 }
 
 // ---------- 勇者 YAML 润色 ----------
@@ -377,16 +377,16 @@ function parseWorldResult(text, draw) {
   // （模型忽略分段指令、直接输出角色卡），整段作为 hero，其余三字段用抽卡兜底
   if (!g && !d && !dis && !h && looksLikeHeroYaml(text)) {
     return {
-      goal: `在「${draw.disaster?.name || "灾厄"}」之下，勇者需拯救世界`,
+      goal: `在「${draw.world?.name || "灾厄"}」之下，勇者需拯救世界`,
       difficultyText: `${draw.diff?.level || "?"}级 · ${draw.diff?.name || ""}`,
-      disaster: draw.disaster?.name || "（末世形态尚未显现）",
+      disaster: "（末世形态尚未显现）",
       hero: cleanLinePrefix(String(text)).trim()
     };
   }
 
-  result.goal = g || `在「${draw.disaster?.name || "灾厄"}」之下，勇者需拯救世界`;
+  result.goal = g || `在「${draw.world?.name || "灾厄"}」之下，勇者需拯救世界`;
   result.difficultyText = d || `${draw.diff?.level || "?"}级 · ${draw.diff?.name || ""}`;
-  result.disaster = dis || draw.disaster?.name || "（末世形态尚未显现）";
+  result.disaster = dis || "（末世形态尚未显现）";
   // 兜底：用抽卡的勇者结构化文本（此前误调用不存在的 heroToPrompt，必然抛 ReferenceError）
   result.hero = h || (draw.hero ? Draw.heroToPromptText(draw.hero) : "（勇者尚未契约，可使用【法则篡改】补充角色卡）");
   return result;

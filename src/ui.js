@@ -213,6 +213,7 @@ function buildPanelHTML() {
   <div class="fs-panel-header">
     <div class="fs-title"><i class="fa-solid fa-dice-d20"></i>命运沙盘</div>
     <div class="fs-skin-ctrl">
+      <button class="fs-icon-btn" id="fs-skin-btn" title="切换日间/夜间皮肤"><i class="fa-solid fa-moon"></i></button>
       <button class="fs-icon-btn" id="fs-silent-btn" title="静默模式：关闭后停止发送/接收信息"><i class="fa-solid fa-volume-high"></i></button>
     </div>
   </div>
@@ -296,6 +297,9 @@ function snapBall() {
 function bindEvents() {
   // 导航
   $$(".fs-tab").forEach(tab => tab.addEventListener("click", () => switchPanel(+tab.dataset.panel)));
+
+  // 皮肤切换（顶栏）
+  $("#fs-skin-btn").addEventListener("click", toggleSkin);
 
   // 静默模式开关（顶栏）
   $("#fs-silent-btn").addEventListener("click", toggleSilent);
@@ -381,6 +385,23 @@ function syncSilentBtn() {
   const icon = btn.querySelector("i");
   if (icon) icon.className = silent ? "fa-solid fa-volume-xmark" : "fa-solid fa-volume-high";
   btn.title = silent ? "静默模式已开启（点击恢复）" : "静默模式：关闭后停止发送/接收信息";
+}
+
+// ---------- 皮肤切换（日间/夜间） ----------
+function toggleSkin() {
+  const next = store.getSkin() === "dark" ? "light" : "dark";
+  store.setSkin(next);
+  applySkin();
+}
+function applySkin() {
+  const dark = store.getSkin() === "dark";
+  document.body.classList.toggle("fs-night", dark);
+  const btn = $("#fs-skin-btn");
+  if (btn) {
+    const icon = btn.querySelector("i");
+    if (icon) icon.className = dark ? "fa-solid fa-sun" : "fa-solid fa-moon";
+    btn.title = dark ? "切换为日间皮肤" : "切换为夜间皮肤";
+  }
 }
 
 // ---------- 100 层防死循环监控 ----------
@@ -1025,6 +1046,7 @@ function renderSettings() {
     </div>
 
     <button class="fs-wax primary" id="fs-save-settings"><i class="fa-solid fa-stamp"></i>铭刻法则（保存）</button>
+    <button class="fs-wax danger" id="fs-reset-all" style="margin-top:12px;width:100%"><i class="fa-solid fa-arrows-rotate"></i>一键初始化（存档归零）</button>
     <div class="fs-admin-deco" id="fs-admin-entry">✦</div>`;
 
   // API 模式切换
@@ -1093,6 +1115,35 @@ function renderSettings() {
     s.externalApi = { baseUrl: $("#fs-ext-url").value, key: $("#fs-ext-key").value, model: $("#fs-ext-model").value };
     store.saveSettings(s);
     showModal("✦ 法则已铭刻", "设置已保存。");
+  });
+
+  // 一键初始化：所有存档数据归零（二次确认）
+  $("#fs-reset-all").addEventListener("click", () => {
+    showModal("☠ 一键初始化", `
+      <p>此操作将把<b style="color:#c23b2a">所有存档数据归零</b>：</p>
+      <p style="font-size:.85em;text-align:left">· 星光结晶与卡牌库存清空<br>· 当前世界（四大文本框）清空<br>· 救世录归档全部删除<br>· 楼层计数与结算缓存重置<br>· Prompt 与 API 配置恢复默认</p>
+      <p>此举<b>不可逆</b>，确定要重铸命运沙盘吗？</p>
+      <button class="fs-wax danger" id="fs-confirm-reset" style="margin-top:8px">确认初始化</button>`);
+    $("#fs-confirm-reset").addEventListener("click", () => {
+      store.resetAll();
+      closeModal();
+      // 清空酒馆上下文注入（避免残留旧世界状态，稍后由轮询按新状态重新注入）
+      try {
+        const ST = getSTContext();
+        if (ST && typeof ST.setExtensionPrompt === "function") ST.setExtensionPrompt(EXT_PROMPT_KEY, "", 0, 0);
+      } catch (e) { /* 忽略 */ }
+      // 刷新全局 UI 状态与所有面板
+      applySkin();
+      applyActive();
+      syncSilentBtn();
+      applyBallState();
+      renderSandbox();
+      renderAssets();
+      renderShop();
+      renderArchive();
+      renderSettings();
+      showModal("✦ 初始化完成", "<p>命运沙盘已重铸，一切归于原点。</p>");
+    });
   });
 
   // 隐藏管理员入口
@@ -1381,6 +1432,7 @@ export function init() {
   _inited = true;
   console.log(`[命运沙盘] 插件加载，运行版本 v${FS_VERSION}。如遇异常请在控制台执行 FateSandbox.debug()`);
   mount();
+  applySkin(); // 应用已保存的皮肤（日间/夜间）
   // 注册每轮对话的沙盘上下文注入（延时/循环注册 + load 兜底）
   ensureContextInjection();
   if (typeof window !== "undefined") {

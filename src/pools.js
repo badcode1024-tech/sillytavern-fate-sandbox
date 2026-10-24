@@ -31,30 +31,7 @@ export const DIFFICULTY_POOLS = [
   { level: "SSS", name: "宇宙终局", desc: "整个宇宙、星际帝国或诸天万界处于终局时刻。基本生存法则被扭曲，文明遭遇毁灭性清洗，一切即将归于虚无。" }
 ];
 
-// ==================== 3. 灾难可能性（仅供参考） ====================
-export const DISASTER_POOLS = [
-  { id: "zombie", name: "丧尸与疫病废土", desc: "某种迅速传染的尸毒、基因病毒或诅咒瘟疫爆发，人类文明防线彻底崩溃。" },
-  { id: "mutant", name: "异变动植物狂潮", desc: "自然界动植物畸变失控，巨兽与魔化兽群反扑人类据点。" },
-  { id: "demon", name: "魔族与深渊入侵", desc: "空间裂隙开启，异界魔物与深渊生物大举涌入，空气中弥漫侵蚀能量。" },
-  { id: "cult", name: "禁忌巫术与邪教污染", desc: "邪恶组织通过暗黑仪式扭曲法则，精神污染频发，社会道德瓦解。" },
-  { id: "ice", name: "极端天灾与冰川末世", desc: "气候突变导致全球进入极寒冰川或烈日炼狱，资源彻底枯竭。" },
-  { id: "tech", name: "科技反噬与智械叛乱", desc: "尖端科技或能量矩阵失控，机器与武器将人类视为清除目标。" },
-  { id: "cosmic", name: "域外污染与维度撕裂", desc: "域外存在降临，物理法则与因果律局部失效，接触者陷入疯狂畸变。" },
-  { id: "surge", name: "灵能魔力暴走与法则失控", desc: "世界能量源过载暴走，局部区域法则错乱、天灾频发。" }
-];
-
-// ==================== 4. 邪恶势力卡池 ====================
-export const EVIL_FACTION_POOLS = [
-  { id: "tyrant", name: "暴君与腐败割据政权", desc: "掌握军政大权的独裁者或军阀，实行严酷高压剥削。" },
-  { id: "cult_leader", name: "狂热邪教与灭世祭司", desc: "崇拜毁灭或邪神的极端组织，试图迎合灾难获取神权。" },
-  { id: "mad_scientist", name: "疯狂炼金术士/科技狂人", desc: "无视伦理利用人体实验或禁忌黑魔法追求极致力量。" },
-  { id: "overlord", name: "深渊魔王/域外旧日化身", desc: "统领天灾源头的绝对主宰，浩劫幕后的终极 Boss。" },
-  { id: "demonic_sect", name: "堕落宗门/魔道巨擘", desc: "因贪恋力量而堕入魔道的强大修行势力，视苍生为养料。" },
-  { id: "corporate", name: "星际财阀/霸权帝国总督", desc: "将整个世界或星球视为可消耗资产的冷血统治者。" },
-  { id: "rogue_ai", name: "失控智械核心/虫群主脑", desc: "视有机生命为低效阻碍，冷酷执行清剿计划的超级意识。" }
-];
-
-// ==================== 5. 勇者外观卡池 ====================
+// ==================== 3. 勇者外观卡池 ====================
 export const HERO_APPEARANCE_POOLS = {
   hairColor: [
     "鸦羽黑", "墨棕", "栗木茶", "金亚麻", "深海蓝黑", "银灰",
@@ -254,4 +231,39 @@ export const FANDOM_POOLS = [
   { id: "novel", name: "小说作品", desc: "以网络小说、轻小说或经典文学为基底的世界观。" },
   { id: "manga", name: "漫画作品", desc: "以漫画、绘本叙事为基底的世界观。" },
   { id: "tokusatsu", name: "特摄作品", desc: "以特摄剧、变身英雄为基底的世界观。" }
+];
+
+// ==================== 11. 同人世界观卡池（异界锚定专用） ====================
+// 仅在使用「异界锚定卡」时从此处抽取一个具体同人世界观，替代原本的 WORLD_TYPE_POOLS，
+// 交由 LLM 润色生成完整世界观并匹配当前灾厄等级。每个条目只含 id 与 name。
+export const IP_UNIVERSE_POOLS = [
+  { id: "us_horror_movie", name: "欧美恐怖电影" },
+  { id: "jp_shonen_anime", name: "日式热血/少年漫" },
+  { id: "game_3a_fantasy", name: "欧美3A奇幻/RPG游戏" },
+  { id: "kr_chaebol_drama", name: "韩剧/财阀权谋" },
+  { id: "us_hero_anim", name: "美式超级英雄动画" },
+  { id: "jp_drama_work", name: "日剧/职业与悬疑" },
+  { id: "us_crime_show", name: "欧美罪案剧" },
+  { id: "game_otome", name: "乙女/女性向游戏" },
+  { id: "us_magic_show", name: "欧美魔幻剧" },
+  { id: "jp_isekai_anime", name: "日式异世界/轻小说" },
+  { id: "kr_zombie_drama", name: "韩剧/丧尸与惊悚" },
+  { id: "game_souls_like", name: "欧美3A魂系/暗黑游戏" },
+  { id: "us_superhero", name: "超级英雄电影" },
+  { id: "jp_mecha_anime", name: "日式科幻/机甲漫" },
+  { id: "us_sci_anim", name: "美式荒诞/科幻动画" },
+  { id: "us_comedy_show", name: "欧美喜剧" },
+  { id: "game_acg_gacha", name: "国产/二次元手游" },
+  { id: "jp_shojo_anime", name: "日式恋爱/少女漫" },
+  { id: "kr_fantasy_drama", name: "韩剧/奇幻浪漫" },
+  { id: "us_movie_general", name: "欧美电影" },
+  { id: "game_3a_scifi", name: "欧美3A动作/科幻游戏" },
+  { id: "us_fantasy_movie", name: "欧美魔幻电影" },
+  { id: "jp_mystery_anime", name: "日式悬疑/推理漫" },
+  { id: "kr_thriller_drama", name: "韩剧/悬疑缉凶" },
+  { id: "us_scifi_show", name: "欧美科幻/废土剧" },
+  { id: "us_fantasy_anim", name: "美式奇幻/冒险动画" },
+  { id: "jp_drama_youth", name: "日剧/校园与青春" },
+  { id: "us_teen_show", name: "欧美青春/校园剧" },
+  { id: "game_jrpg", name: "日式RPG (JRPG) 游戏" }
 ];
