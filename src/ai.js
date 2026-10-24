@@ -5,7 +5,7 @@
  */
 import { store } from "./store.js";
 import * as Draw from "./draw.js";
-import { REWARD_TABLE, DEFAULT_PROMPTS } from "./pools.js";
+import { REWARD_TABLE, DEFAULT_PROMPTS, HERO_COMPLETENESS_RULES } from "./pools.js";
 
 // ---------- 读取酒馆上下文（多版本兼容） ----------
 function getContext() {
@@ -246,8 +246,28 @@ export async function generateWorldWithDraw(draw, { fandom = false } = {}) {
   const s = store.getSettings();
   const worldPrompt = s.prompts.world || DEFAULT_WORLD_PROMPT;
   const prompt = buildWorldPrompt(draw, worldPrompt, fandom);
-  const text = await generateWithRetry(prompt, { temperature: 0.9, maxTokens: 2048 });
-  return parseWorldResult(text, draw);
+  // 世界四段 + 完整勇者 YAML（800-1500 字），预算必须给足，否则勇者段被截断
+  const text = await generateWithRetry(prompt, { temperature: 0.9, maxTokens: 4096 });
+  const result = parseWorldResult(text, draw);
+  // 勇者段不完整（截断/敷衍/兜底文案）→ 走勇者专属通道二次生成完整 YAML
+  if (!isHeroYamlComplete(result.hero)) {
+    try {
+      const heroYaml = await polishHeroYaml(draw);
+      if (isHeroYamlComplete(heroYaml)) result.hero = heroYaml;
+    } catch (e) { /* 二次生成失败则保留原值 */ }
+  }
+  return result;
+}
+
+// 勇者 YAML 完整性判定：长度达标 + 含必备字段 + 无占位敷衍
+function isHeroYamlComplete(heroText) {
+  const t = String(heroText || "").trim();
+  if (t.length < 300) return false;                       // 太短必是截断/敷衍
+  if (!/^\s*name\s*:/m.test(t)) return false;             // 缺姓名
+  const hasBody = /^\s*(description|first_mes|personality)\s*:/m.test(t);
+  if (!hasBody) return false;                             // 缺主体字段
+  if (/（勇者尚未契约|（此处省略）|^略$|待补充|同上/.test(t)) return false; // 占位兜底
+  return true;
 }
 
 // 异界特典：自定义提示词 + 同人世界观
@@ -255,15 +275,24 @@ export async function generateWorldSpecial(fandomHint) {
   const s = store.getSettings();
   const worldPrompt = s.prompts.world || DEFAULT_WORLD_PROMPT;
   const prompt = `${worldPrompt}\n\n【异界特典 · 用户指定世界观】\n请围绕以下用户指定 IP/世界观生成完整世界：${fandomHint}`;
-  const text = await generateWithRetry(prompt, { temperature: 0.9, maxTokens: 2048 });
-  return parseWorldResult(text, { world: { name: fandomHint }, diff: { level: store.getDifficulty(), name: "" }, fandom: true, hero: null });
+  const text = await generateWithRetry(prompt, { temperature: 0.9, maxTokens: 4096 });
+  const draw = { world: { name: fandomHint }, diff: { level: store.getDifficulty(), name: "" }, fandom: true, hero: null };
+  const result = parseWorldResult(text, draw);
+  // 勇者段不完整 → 二次生成完整 YAML（无勇者抽取数据，由 LLM 自主发挥）
+  if (!isHeroYamlComplete(result.hero)) {
+    try {
+      const heroYaml = await polishHeroYaml(draw);
+      if (isHeroYamlComplete(heroYaml)) result.hero = heroYaml;
+    } catch (e) { /* 二次生成失败则保留原值 */ }
+  }
+  return result;
 }
 
 // ---------- 勇者 YAML 润色 ----------
 export async function polishHeroYaml(draw) {
   const s = store.getSettings();
   const prompt = buildHeroPrompt(draw);
-  const text = await generateWithRetry(prompt, { temperature: 0.85, maxTokens: 1600 });
+  const text = await generateWithRetry(prompt, { temperature: 0.85, maxTokens: 3072 });
   return text.trim();
 }
 
@@ -306,9 +335,11 @@ ${heroText ? "\n【勇者抽取结果】\n" + heroText : ""}
 
 function buildHeroPrompt(draw) {
   const heroText = draw && draw.hero ? Draw.heroToPromptText(draw.hero) : "";
-  return `请根据以下勇者抽取结果，润色生成一个完整的 SillyTavern YAML 格式角色卡（包含 name、description、personality、scenario、first_mes 等字段），勇者名字需符合世界背景。
+  return `请根据以下勇者抽取结果，润色生成一个完整的 SillyTavern YAML 格式角色卡，勇者名字需符合世界背景。
 
 ${heroText}
+
+${HERO_COMPLETENESS_RULES}
 
 【核心视角铁律：勇者对使命一无所知】
 - 勇者绝对不知道「命运沙盘系统」「救世圣女」「拯救世界任务」以及「自己是勇者」的存在！他坚信自己只是生活在这个世界的普通本土原住民。
@@ -320,10 +351,11 @@ ${heroText}
 
 要求：
 1. 名字贴合世界背景，富有记忆点。
-2. description 整合外观与核心性格，展现灵魂底色（以本土原住民视角书写）。
+2. description 整合外观与核心性格，展现灵魂底色（以本土原住民视角书写，不少于 300 字）。
 3. personality 整合表面性格（正面3/负面1/中性1）。
-4. scenario 设定勇者作为普通人在灾厄世界中的日常处境，与 <user> 的初始相遇关系。
-5. 直接输出合法 YAML，不要多余说明。`;
+4. scenario 设定勇者作为普通人在灾厄世界中的日常处境，与 <user> 的初始相遇关系（不少于 150 字）。
+5. first_mes 以勇者日常口吻书写开场白（不少于 300 字），并附 1-2 组 mes_example 对话示例。
+6. 直接输出合法 YAML（长文本用 | 或 > 块标量），不要多余说明。`;
 }
 
 function buildJudgePrompt(judgePrompt, world, difficulty, memory, opts = {}) {

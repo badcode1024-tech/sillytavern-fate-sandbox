@@ -103,6 +103,10 @@ function getStore() {
     for (const k of ["judge", "world", "saga", "save"]) {
       if (!s.prompts[k]) s.prompts[k] = P.DEFAULT_PROMPTS[k];
     }
+    // 迁移：旧版「创世神谕」缺少勇者完整性规范（导致勇者 YAML 只有只言片语）→ 升级为 v2 模板
+    if (typeof s.prompts.world === "string" && !s.prompts.world.includes("勇者角色卡完整性规范")) {
+      s.prompts.world = P.DEFAULT_PROMPTS.world;
+    }
   }
   // 迁移：清理旧版卡池覆盖（v2 结构变更——删除 DISASTER/EVIL、合并三档西幻、新增同人池）
   const po = host.__fateSandbox.pools;
