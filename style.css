@@ -176,6 +176,20 @@ body.fs-night #fs-panel::before { opacity: .08; }
   gap: 8px;
 }
 #fs-panel .fs-title i { color: var(--fs-gold); }
+/* 标题旁的版本徽标（浅色/夜间自动适配） */
+#fs-panel .fs-version-tag {
+  font-size: .58em;
+  font-weight: 600;
+  color: var(--fs-ink-soft);
+  border: 1px solid var(--fs-line);
+  border-radius: 8px;
+  padding: 1px 7px;
+  margin-left: 4px;
+  letter-spacing: 1px;
+  line-height: 1.5;
+  align-self: center;
+  white-space: nowrap;
+}
 #fs-panel .fs-icon-btn {
   width: 38px; height: 38px; border-radius: 50%;
   border: 2px solid var(--fs-line);
