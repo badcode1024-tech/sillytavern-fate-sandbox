@@ -1,23 +1,66 @@
 /* =========================================================
    命运沙盘 Fate Sandbox —— 样式表
-   主题：暗色 Morandi 高沉浸（固定，无日夜切换）
+   主题：日间浅色（默认） / 夜间深色（一键切换）
    ========================================================= */
 
-/* ---------- 主题变量（固定暗色 Morandi） ---------- */
+/* ---------- 主题变量（日间浅色 · 默认） ---------- */
+/* 浅色背景用深色文字，深色模块（按钮等）用浅色文字，确保清晰可读 */
 #fs-ball, #fs-panel, #fs-zoom-mask, #fs-modal-mask {
-  --fs-paper: #211a12;
-  --fs-paper-2: #2c2318;
-  --fs-ink: #e7d6b4;
-  --fs-ink-soft: #b39b74;
-  --fs-line: #5a4428;
-  --fs-accent: #c05a3a;
-  --fs-accent-2: #d09a4a;
-  --fs-gold: #d4af37;
-  --fs-shadow: rgba(0, 0, 0, .6);
-  --fs-panel: rgba(40, 32, 22, .92);
-  --fs-bg: #1d1816;
-  --fs-danger: #7a2a1a;
+  --fs-paper: #faf5ec;
+  --fs-paper-2: #f0e6d6;
+  --fs-ink: #3d2e1e;
+  --fs-ink-soft: #7a6448;
+  --fs-line: #c9b896;
+  --fs-accent: #a8442a;
+  --fs-accent-2: #b07832;
+  --fs-gold: #b8860b;
+  --fs-shadow: rgba(120, 90, 50, .18);
+  --fs-panel: rgba(250, 245, 236, .92);
+  --fs-bg: #f4ede0;
+  --fs-danger: #c23b2a;
+  --fs-input-bg: rgba(0, 0, 0, .04);
+  --fs-track-bg: rgba(0, 0, 0, .08);
 }
+
+/* ---------- 夜间模式皮肤（#242424 底色 · 65% 白字 · 无阴影） ---------- */
+body.fs-night #fs-ball,
+body.fs-night #fs-panel,
+body.fs-night #fs-zoom-mask,
+body.fs-night #fs-modal-mask {
+  --fs-paper: #2a2a2a;
+  --fs-paper-2: #333333;
+  --fs-ink: rgba(255, 255, 255, .65);
+  --fs-ink-soft: rgba(255, 255, 255, .5);
+  --fs-line: rgba(255, 255, 255, .18);
+  --fs-accent: rgba(255, 255, 255, .85);
+  --fs-accent-2: rgba(255, 255, 255, .7);
+  --fs-gold: rgba(255, 255, 255, .8);
+  --fs-shadow: none;
+  --fs-panel: rgba(36, 36, 36, .96);
+  --fs-bg: #242424;
+  --fs-danger: #c23b2a;
+  --fs-input-bg: rgba(255, 255, 255, .05);
+  --fs-track-bg: rgba(255, 255, 255, .1);
+}
+/* 夜间模式：去除一切阴影 */
+body.fs-night #fs-panel,
+body.fs-night #fs-panel *,
+body.fs-night #fs-zoom-mask,
+body.fs-night #fs-zoom-mask *,
+body.fs-night #fs-modal-mask,
+body.fs-night #fs-modal-mask * { box-shadow: none !important; }
+/* 夜间模式：按钮/兑换等深色模块改用深色底 + 浅色字，保证可读 */
+body.fs-night #fs-panel .fs-wax,
+body.fs-night #fs-panel .fs-redeem,
+body.fs-night #fs-modal-mask .fs-modal-close { color: rgba(255, 255, 255, .65); }
+body.fs-night #fs-panel .fs-wax { background: #3a3a3a; }
+body.fs-night #fs-panel .fs-wax.alt { background: #333333; }
+body.fs-night #fs-panel .fs-wax.primary { background: #2a2a2a; }
+body.fs-night #fs-panel .fs-wax.danger { background: #5a1a10; }
+body.fs-night #fs-panel .fs-redeem { background: #3a3a3a; }
+body.fs-night #fs-modal-mask .fs-modal-close { background: #3a3a3a; }
+/* 夜间模式：背景图淡化，避免干扰深色底 */
+body.fs-night #fs-panel::before { opacity: .08; }
 
 /* ---------- 悬浮球（圆角正方形 · 无边框，参考记忆宫殿尺寸） ---------- */
 #fs-ball {
@@ -93,7 +136,7 @@
   flex-direction: column;
   transform: translateX(105%);
   transition: transform .4s cubic-bezier(.25,.8,.25,1);
-  box-shadow: -12px 0 40px rgba(0,0,0,.4);
+  box-shadow: -12px 0 40px var(--fs-shadow);
   box-sizing: border-box;
   /* 关键：修复触顶/触底阻尼失效 */
   overscroll-behavior: contain;
@@ -101,7 +144,7 @@
 #fs-panel.open { transform: translateX(0); }
 #fs-panel * { box-sizing: border-box; }
 
-/* 羊皮纸背景图层（固定暗色，燃烧边羊皮纸） */
+/* 羊皮纸背景图层（日间正常显示，夜间淡化） */
 #fs-panel::before {
   content: "";
   position: absolute;
@@ -109,9 +152,7 @@
   background-image: url("../assets/bg/parchment_v2.png");
   background-size: cover;
   background-position: center;
-  opacity: .18;
-  mix-blend-mode: screen;
-  filter: brightness(.6) sepia(.4);
+  opacity: .25;
   pointer-events: none;
   z-index: 0;
 }
@@ -150,6 +191,8 @@
   color: #c23b2a;
   background: rgba(194, 59, 42, .12);
 }
+/* 顶栏按钮组 */
+#fs-panel .fs-skin-ctrl { display: flex; align-items: center; gap: 8px; }
 
 /* 导航栏 */
 #fs-panel .fs-nav {
@@ -244,7 +287,7 @@
 #fs-panel .fs-field-sub { font-size: .78em; color: var(--fs-ink-soft); font-weight: 400; }
 #fs-panel .fs-field textarea {
   width: 100%; min-height: 72px; resize: vertical;
-  background: rgba(0,0,0,.25);
+  background: var(--fs-input-bg);
   color: var(--fs-ink);
   border: 1px dashed var(--fs-line);
   border-radius: 8px;
@@ -394,11 +437,11 @@
   border: 3px double var(--fs-gold); border-radius: 14px; padding: 16px;
   background: linear-gradient(160deg, var(--fs-paper), var(--fs-paper-2));
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  box-shadow: 0 10px 30px rgba(0,0,0,.6);
+  box-shadow: 0 10px 30px var(--fs-shadow);
 }
 #fs-zoom-mask .fs-flip-back { transform: rotateY(180deg); text-align: center; }
 #fs-zoom-mask .fs-flip-back h4 { color: var(--fs-accent); margin: 0 0 10px; }
-#fs-zoom-mask .fs-flip-back p { font-size: .9em; line-height: 1.6; }
+#fs-zoom-mask .fs-flip-back p { font-size: .9em; line-height: 1.6; color: var(--fs-ink); }
 #fs-zoom-mask .fs-card-art { font-size: 3em; overflow: hidden; border: none; }
 #fs-zoom-mask .fs-card-art .fs-card-img {
   width: 100%; height: 100%;
@@ -419,7 +462,7 @@
 #fs-panel .fs-floor-bar.warn { border-color: #c23b2a; box-shadow: 0 0 8px rgba(194,59,42,.4); }
 #fs-panel .fs-floor-label { font-size: .78em; color: var(--fs-ink-soft); margin-bottom: 5px; display: flex; align-items: center; gap: 6px; }
 #fs-panel .fs-floor-bar.warn .fs-floor-label { color: #c23b2a; font-weight: 700; }
-#fs-panel .fs-floor-track { height: 6px; border-radius: 3px; background: rgba(0,0,0,.15); overflow: hidden; }
+#fs-panel .fs-floor-track { height: 6px; border-radius: 3px; background: var(--fs-track-bg); overflow: hidden; }
 #fs-panel .fs-floor-fill { height: 100%; background: linear-gradient(90deg, var(--fs-gold), var(--fs-accent-2)); transition: width .5s; }
 #fs-panel .fs-floor-bar.warn .fs-floor-fill { background: linear-gradient(90deg, #c23b2a, #7a1212); }
 
@@ -434,7 +477,8 @@
   max-width: 380px; width: 100%; max-height: 80vh; overflow-y: auto;
   background: linear-gradient(160deg, var(--fs-paper), var(--fs-paper-2));
   border: 3px double var(--fs-gold); border-radius: 14px; padding: 22px;
-  text-align: center; box-shadow: 0 14px 40px rgba(0,0,0,.6);
+  text-align: center; box-shadow: 0 14px 40px var(--fs-shadow);
+  color: var(--fs-ink);
 }
 #fs-modal-mask .fs-modal h3 { color: var(--fs-accent); margin: 0 0 10px; font-size: 1.1em; }
 #fs-modal-mask .fs-modal p { font-size: .92em; line-height: 1.6; margin: 0 0 14px; white-space: pre-wrap; }
@@ -449,7 +493,7 @@
 /* 弹窗内输入框 */
 #fs-modal-mask input, #fs-modal-mask textarea {
   width: 100%;
-  background: rgba(0,0,0,.25);
+  background: var(--fs-input-bg);
   color: var(--fs-ink);
   border: 1px solid var(--fs-line);
   border-radius: 8px;
@@ -476,7 +520,7 @@
 #fs-panel .fs-set-block label { display: flex; align-items: center; gap: 7px; font-weight: 700; color: var(--fs-accent); margin-bottom: 6px; }
 #fs-panel .fs-set-block textarea {
   width: 100%; min-height: 80px; resize: vertical;
-  background: rgba(0,0,0,.25); color: var(--fs-ink);
+  background: var(--fs-input-bg); color: var(--fs-ink);
   border: 1px solid var(--fs-line); border-radius: 8px; padding: 10px 12px;
   font-family: inherit; font-size: .9em; line-height: 1.5;
 }
@@ -489,7 +533,7 @@
 }
 #fs-panel .fs-model-row select {
   flex: 1; padding: 8px 10px;
-  background: rgba(0,0,0,.25); color: var(--fs-ink);
+  background: var(--fs-input-bg); color: var(--fs-ink);
   border: 1px solid var(--fs-line); border-radius: 8px;
   font-family: inherit; font-size: .9em;
   height: 36px;
@@ -527,7 +571,7 @@
 #fs-panel .fs-admin-row { margin-bottom: 6px; }
 #fs-panel .fs-admin-row input {
   width: 100%; padding: 6px 8px;
-  background: rgba(0,0,0,.25); color: var(--fs-ink);
+  background: var(--fs-input-bg); color: var(--fs-ink);
   border: 1px solid var(--fs-line); border-radius: 6px; font-size: .85em;
 }
 #fs-panel .fs-admin-sub { font-size: .82em; color: var(--fs-accent-2); margin: 8px 0 4px; font-weight: 700; }
@@ -542,14 +586,14 @@
 }
 #fs-panel .fs-admin-item input {
   width: 100%; padding: 6px 8px; margin-bottom: 5px;
-  background: rgba(0,0,0,.25); color: var(--fs-ink);
+  background: var(--fs-input-bg); color: var(--fs-ink);
   border: 1px solid var(--fs-line); border-radius: 6px; font-size: .85em;
   font-weight: 700;
 }
 #fs-panel .fs-admin-item textarea {
   width: 100%; min-height: 44px; resize: vertical;
   padding: 6px 8px;
-  background: rgba(0,0,0,.25); color: var(--fs-ink-soft);
+  background: var(--fs-input-bg); color: var(--fs-ink-soft);
   border: 1px solid var(--fs-line); border-radius: 6px; font-size: .8em;
   line-height: 1.5;
   font-family: inherit;
