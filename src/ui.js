@@ -112,7 +112,7 @@ function applyActive() {
 // 用于「双实例防御」——扩展目录存在两份副本（或浏览器缓存旧模块）时，
 // 先挂载的旧版本会让新版 mount() 静默退出，导致用户点击的仍是旧代码按钮
 // （症状：生成世界"成功"但文本框空白、上下文不注入，与修复前一模一样）。
-const FS_VERSION = "1.9.3";
+const FS_VERSION = "2.0.0";
 
 // 仅移除 DOM 节点（不动数据，供版本接管 / 卸载复用）
 function removeDOM() {
@@ -211,7 +211,7 @@ function mount() {
 function buildPanelHTML() {
   return `
   <div class="fs-panel-header">
-    <div class="fs-title"><i class="fa-solid fa-dice-d20"></i>命运沙盘</div>
+    <div class="fs-title"><i class="fa-solid fa-dice-d20"></i>命运沙盘<span class="fs-version-tag">v${FS_VERSION}</span></div>
     <div class="fs-skin-ctrl">
       <button class="fs-icon-btn" id="fs-skin-btn" title="切换日间/夜间皮肤"><i class="fa-solid fa-moon"></i></button>
       <button class="fs-icon-btn" id="fs-silent-btn" title="静默模式：关闭后停止发送/接收信息"><i class="fa-solid fa-volume-high"></i></button>

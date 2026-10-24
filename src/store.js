@@ -104,6 +104,29 @@ function getStore() {
       if (!s.prompts[k]) s.prompts[k] = P.DEFAULT_PROMPTS[k];
     }
   }
+  // 迁移：清理旧版卡池覆盖（v2 结构变更——删除 DISASTER/EVIL、合并三档西幻、新增同人池）
+  const po = host.__fateSandbox.pools;
+  if (po && typeof po === "object") {
+    let changed = false;
+    if (po.DISASTER_POOLS || po.EVIL_FACTION_POOLS) {
+      delete po.DISASTER_POOLS;
+      delete po.EVIL_FACTION_POOLS;
+      changed = true;
+    }
+    if (Array.isArray(po.WORLD_TYPE_POOLS)) {
+      const oldIds = ["low_magic", "mid_magic", "high_magic"];
+      const hasOld = po.WORLD_TYPE_POOLS.some(w => w && oldIds.includes(w.id));
+      const hasMerged = po.WORLD_TYPE_POOLS.some(w => w && w.id === "western_fantasy");
+      if (hasOld && !hasMerged) {
+        const at = Math.max(po.WORLD_TYPE_POOLS.findIndex(w => w && oldIds.includes(w.id)), 0);
+        po.WORLD_TYPE_POOLS = po.WORLD_TYPE_POOLS.filter(w => !(w && oldIds.includes(w.id)));
+        po.WORLD_TYPE_POOLS.splice(at, 0, P.WORLD_TYPE_POOLS[0]);
+        changed = true;
+      }
+    }
+    if (!po.IP_UNIVERSE_POOLS) { po.IP_UNIVERSE_POOLS = P.IP_UNIVERSE_POOLS; changed = true; }
+    if (changed) persist();
+  }
   return host.__fateSandbox;
 }
 
